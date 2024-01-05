@@ -272,6 +272,7 @@ class Mesh():
 
     # write to obj file
     def write(self, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
 
         mtl_path = path.replace('.obj', '.mtl')
         albedo_path = path.replace('.obj', '_albedo.png')

@@ -3,7 +3,7 @@ import json
 import pickle as pkl
 import random
 
-os.environ['PYOPENGL_PLATFORM'] = 'osmesa'  # Uncommnet this line while running remotely
+# os.environ['PYOPENGL_PLATFORM'] = 'osmesa'  # Uncommnet this line while running remotely
 import argparse
 import cv2
 import torch
@@ -28,6 +28,7 @@ def get_motion_diffusion_pose(file_path):
     x_translations = data['motion'][-1, :3]
     motion = data['motion'][:-1]
 
+    print(motion.shape)
     motion = torch.as_tensor(motion).permute(2, 0, 1)
     x_translations = torch.as_tensor(x_translations).permute(1, 0)
     from lib.common.rotation_conversions import rotation_6d_to_matrix, matrix_to_euler_angles, matrix_to_axis_angle
@@ -400,7 +401,8 @@ if __name__ == '__main__':
                         help="file of motion diffusion file for face animation")
     args = parser.parse_args()
 
-    ckpt_file = f"{args.workspace}/tada/{args.subject}/checkpoints/tada_ep0150.pth"
+    ckpt_file = f"{args.workspace}/with_normal_supervision/{args.subject}/checkpoints/with_normal_supervision_ep0150.pth"
+    print(ckpt_file)
     assert os.path.exists(ckpt_file)
     animator = Animation(render_res=args.render_res)
     animator.load_ckpt_data(ckpt_file)
