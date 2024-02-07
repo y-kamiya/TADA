@@ -9,8 +9,13 @@ save_mesh: True
 guidance:
   name: sd
   vram_O: True
-  sd_version: '2.1'
-  hf_key: None
+  sd_version: '1.5'
+  hf_key: #None
+  t_range: [0.02, 0.98]
+  weighting_strategy: 'fantasia3d'
+  ckpt: #None
+  lora: #None
+  embeddings: #None
 training:
   iters: 5000
   albedo_iters: 10000
