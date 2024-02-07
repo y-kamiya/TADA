@@ -303,20 +303,23 @@ if __name__ == '__main__':
 
     sd = StableDiffusion(device, opt.sd_version, opt.hf_key)
 
-    subjects = open("./data/prompt/fictional.txt", 'r').read().splitlines()[:5]
+    # subjects = open("./data/prompt/fictional.txt", 'r').read().splitlines()[:5]
     # opt.negative
     imgs = [
         np.vstack([
-            sd.prompt_to_img(f"a 3D rendering of the mouth of {prompt}, {v}", opt.negative, opt.H, opt.W, opt.steps)[0]
-            for v in ["front view"
-                      # "back view", "side view",
-                      # "overhead view"
-                      ]
+            # sd.prompt_to_img(f"a 3D rendering of the mouth of {prompt}, {v}", opt.negative, opt.H, opt.W, opt.steps)[0]
+            np.hstack([
+                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, full-body", opt.negative, opt.H, opt.W, opt.steps)[0],
+                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, face", opt.negative, opt.H, opt.W, opt.steps)[0],
+            ])
+
+            for v in ["front" "side", "back", "overhead"]
+            # for v in ["front view" "back view", "side view", "overhead view"]
         ])
-        for prompt in subjects
+        # for prompt in subjects
     ]
 
-    cv2.imwrite("superman.png", np.hstack(imgs)[..., ::-1])
+    cv2.imwrite("sd.png", np.hstack(imgs)[..., ::-1])
 
     # visualize image
     # plt.imshow(imgs[0])
