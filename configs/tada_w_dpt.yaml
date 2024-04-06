@@ -13,7 +13,7 @@ training:
   train_face_ratio: 0.3
   iters: 15000
   ckpt: scratch
-  workspace: "../data/tada"
+  workspace: "output"
   use_dpt: True
 data:
   phi_range: [-180, 180]

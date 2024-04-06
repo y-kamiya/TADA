@@ -18,6 +18,7 @@ easydict
 yacs
 fvcore
 pyopengl==3.1.4
+networkx==2.5.1
 iopath
 ninja
 mediapipe
