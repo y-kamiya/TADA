@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from transformers import CLIPTextModel, CLIPTokenizer, logging
-from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler, DDIMScheduler, StableDiffusionPipeline
+from diffusers import AutoencoderKL, UNet2DConditionModel, PNDMScheduler, DDIMScheduler, StableDiffusionPipeline, DPMSolverMultistepScheduler
 
 # suppress partial model loading warning
 logging.set_verbosity_error()
@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.cuda.amp import custom_bwd, custom_fwd
-from .perpneg_utils import weighted_perpendicular_aggregator
+# from .perpneg_utils import weighted_perpendicular_aggregator
 
 
 class SpecifyGradient(torch.autograd.Function):
@@ -37,20 +37,20 @@ def seed_everything(seed):
 
 
 class StableDiffusion(nn.Module):
-    def __init__(self, device, fp16, vram_O, sd_version='2.1', hf_key=None, t_range=[0.02, 0.98],
-                 weighting_strategy='fantasia3d'):
+    def __init__(self, device, fp16, opt):
         super().__init__()
 
         self.device = device
-        self.sd_version = sd_version
+        self.opt = opt
+        self.sd_version = opt.sd_version
         self.precision_t = torch.float16 if fp16 else torch.float32
-        self.weighting_strategy = weighting_strategy
+        self.weighting_strategy = opt.weighting_strategy
 
         print(f'[INFO] loading stable diffusion...')
 
-        if hf_key is not None:
-            print(f'[INFO] using hugging face custom model key: {hf_key}')
-            model_key = hf_key
+        if opt.hf_key is not None:
+            print(f'[INFO] using hugging face custom model key: {opt.hf_key}')
+            model_key = opt.hf_key
         elif self.sd_version == '2.1':
             model_key = "stabilityai/stable-diffusion-2-1-base"
         elif self.sd_version == '2.0':
@@ -60,16 +60,40 @@ class StableDiffusion(nn.Module):
         else:
             raise ValueError(f'Stable-diffusion version {self.sd_version} not supported.')
 
-        # Create model
-        self.vae = AutoencoderKL.from_pretrained(model_key, subfolder="vae").to(self.device)
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_key, subfolder="tokenizer")
-        self.text_encoder = CLIPTextModel.from_pretrained(model_key, subfolder="text_encoder").to(self.device)
-        self.unet = UNet2DConditionModel.from_pretrained(model_key, subfolder="unet").to(self.device)
+        pipe_kargs = {
+            "use_safetensors": True,
+            "load_safety_checker": False,
+            # "torch_dtype": torch.bfloat16,
+        }
 
-        self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler")
+        print(opt)
+        if opt.ckpt is not None:
+            self.pipeline = StableDiffusionPipeline.from_single_file(opt.ckpt).to(self.device)
+        else:
+            self.pipeline = StableDiffusionPipeline.from_pretrained(
+                model_key,
+                **pipe_kargs,
+            ).to(self.device)
+
+        if opt.lora is not None:
+            self.pipeline.load_lora_weights(opt.lora)
+
+        if opt.embeddings is not None:
+            self.pipeline.load_textual_inversion(opt.embeddings, token="<V>")
+
+        # Create model
+        self.vae = self.pipeline.vae
+        self.tokenizer = self.pipeline.tokenizer
+        self.text_encoder = self.pipeline.text_encoder
+        self.unet = self.pipeline.unet
+
+        # self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler")
+        self.pipeline.scheduler = DDIMScheduler.from_config(self.pipeline.scheduler.config)
+        # self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(self.pipeline.scheduler.config)
+        self.scheduler = self.pipeline.scheduler
         self.num_train_timesteps = self.scheduler.config.num_train_timesteps
-        self.min_step = int(self.num_train_timesteps * t_range[0])
-        self.max_step = int(self.num_train_timesteps * t_range[1])
+        self.min_step = int(self.num_train_timesteps * opt.t_range[0])
+        self.max_step = int(self.num_train_timesteps * opt.t_range[1])
         self.alphas = self.scheduler.alphas_cumprod.to(self.device)  # for convenience
 
         print(f'[INFO] loaded stable diffusion!')
@@ -168,8 +192,7 @@ class StableDiffusion(nn.Module):
             # perform guidance (high scale from paper!)
             noise_pred_uncond, noise_pred_text = unet_output[:B], unet_output[B:]
             delta_noise_preds = noise_pred_text - noise_pred_uncond.repeat(K, 1, 1, 1)
-            noise_pred = noise_pred_uncond + guidance_scale * weighted_perpendicular_aggregator(delta_noise_preds,
-                                                                                                weights, B)
+            # noise_pred = noise_pred_uncond + guidance_scale * weighted_perpendicular_aggregator(delta_noise_preds, weights, B)
 
         # w(t), sigma_t^2
         w = (1 - self.alphas[t])
@@ -295,28 +318,36 @@ if __name__ == '__main__':
     parser.add_argument('-W', type=int, default=512)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--steps', type=int, default=50)
+    parser.add_argument('--ckpt', type=str, default=None)
+    parser.add_argument('--lora', type=str, default=None)
+    parser.add_argument('--embeddings', type=str, default=None)
+    parser.add_argument('--weighting_strategy', type=str, default='fantasia3d')
+    parser.add_argument('--t_range', type=float, nargs='*', default=[0.02, 0.98])
     opt = parser.parse_args()
 
     seed_everything(opt.seed)
 
     device = torch.device('cuda')
 
-    sd = StableDiffusion(device, opt.sd_version, opt.hf_key)
+    sd = StableDiffusion(device, False, opt)
 
-    subjects = open("./data/prompt/fictional.txt", 'r').read().splitlines()[:5]
+    # subjects = open("./data/prompt/fictional.txt", 'r').read().splitlines()[:5]
     # opt.negative
     imgs = [
         np.vstack([
-            sd.prompt_to_img(f"a 3D rendering of the mouth of {prompt}, {v}", opt.negative, opt.H, opt.W, opt.steps)[0]
-            for v in ["front view"
-                      # "back view", "side view",
-                      # "overhead view"
-                      ]
+            # sd.prompt_to_img(f"a 3D rendering of the mouth of {prompt}, {v}", opt.negative, opt.H, opt.W, opt.steps)[0]
+            np.hstack([
+                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, full-body", opt.negative, opt.H, opt.W, opt.steps, guidance_scale=7.5)[0],
+                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, face", opt.negative, opt.H, opt.W, opt.steps, guidance_scale=7.5)[0],
+            ])
+
+            for v in ["front" "side", "back", "overhead"]
+            # for v in ["front view" "back view", "side view", "overhead view"]
         ])
-        for prompt in subjects
+        # for prompt in subjects
     ]
 
-    cv2.imwrite("superman.png", np.hstack(imgs)[..., ::-1])
+    cv2.imwrite("sd.png", np.hstack(imgs)[..., ::-1])
 
     # visualize image
     # plt.imshow(imgs[0])
