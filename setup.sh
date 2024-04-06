@@ -8,7 +8,7 @@ pushd smplx
 python setup.py install
 popd
 
-pip install cuda-python pytorch-lightning
+pip install cuda-python pytorch-lightning omegaconf
 
 # can not download due to permission
 # pip install gdown 
