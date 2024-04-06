@@ -337,8 +337,8 @@ if __name__ == '__main__':
         np.vstack([
             # sd.prompt_to_img(f"a 3D rendering of the mouth of {prompt}, {v}", opt.negative, opt.H, opt.W, opt.steps)[0]
             np.hstack([
-                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, full-body", opt.negative, opt.H, opt.W, opt.steps)[0],
-                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, face", opt.negative, opt.H, opt.W, opt.steps)[0],
+                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, full-body", opt.negative, opt.H, opt.W, opt.steps, guidance_scale=7.5)[0],
+                sd.prompt_to_img(f"a {v} view 3D rendering of {opt.prompt}, face", opt.negative, opt.H, opt.W, opt.steps, guidance_scale=7.5)[0],
             ])
 
             for v in ["front" "side", "back", "overhead"]
