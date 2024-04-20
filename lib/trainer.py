@@ -91,9 +91,9 @@ class Trainer(object):
             self.prepare_text_embeddings()
 
         # try out torch 2.0
-        if torch.__version__[0] == '2':
-            self.model = torch.compile(self.model)
-            self.guidance = torch.compile(self.guidance)
+        # if torch.__version__[0] == '2':
+        #     self.model = torch.compile(self.model)
+        #     self.guidance = torch.compile(self.guidance)
 
         if isinstance(criterion, nn.Module):
             criterion.to(self.device)
