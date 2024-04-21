@@ -36,13 +36,22 @@ if __name__ == '__main__':
             phase: str one of ['train', 'test' 'val']
         Returns:
         """
-        size = 4 if phase == 'val' else 100
-        dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
-        return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+        opt = cfg.guidance
+        if opt.name == 'imagedream' and phase == "train":
+            config = RandomMultiviewCameraDataModuleConfig()
+            dataset = RandomMultiviewCameraIterableDataset(config)
+            return DataLoader(dataset, batch_size=None, num_workers=0, collate_fn=dataset.collate)
+        else:
+            size = 4 if phase == 'val' else 100
+            dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
+            return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
 
     def configure_guidance():
         opt = cfg.guidance
-        if opt.name == 'sd':
+        if opt.name == 'imagedream':
+            from lib.guidance.multiview_diffusion import MultiviewDiffusion
+            return MultiviewDiffusion()
+        elif opt.name == 'sd':
             from lib.guidance.sd import StableDiffusion
             return StableDiffusion(device, cfg.fp16, opt)
         elif opt.name == 'if':

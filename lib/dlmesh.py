@@ -394,4 +394,5 @@ class DLMesh(nn.Module):
             "alpha": alpha,
             "normal": normal,
             "smplx_landmarks": smplx_landmarks,
+            "bg_color": bg_color,
         }

@@ -9,7 +9,10 @@ pushd smplx
 python setup.py install
 popd
 
-pip install cuda-python pytorch-lightning omegaconf
+pip install -r ImageDream/requirements.txt
+pip install -e ImageDream
+pip install -e ImageDream/extern/ImageDream
+# pip install cuda-python pytorch-lightning omegaconf
 
 # can not download due to permission
 # pip install gdown 
