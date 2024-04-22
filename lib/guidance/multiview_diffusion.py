@@ -1,9 +1,13 @@
 from threestudio.models.guidance.multiview_diffusion_guidance import MultiviewDiffusionGuidance
+from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
 
 
 class MultiviewDiffusion(MultiviewDiffusionGuidance):
     def __init__(self):
-        self.prompt_utils = self.prompt_processor()
+        self.prompt_utils = StableDiffusionPromptProcessor({})
+
+    def parameters(self):
+        return []
 
     def get_text_embeds(self, prompts):
         pass

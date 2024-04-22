@@ -8,6 +8,8 @@ from lib.trainer import *
 from lib.dlmesh import DLMesh
 from lib.common.utils import load_config
 
+import threestudio.utils.config as three_cfg
+
 torch.autograd.set_detect_anomaly(True)
 
 if __name__ == '__main__':
@@ -30,6 +32,9 @@ if __name__ == '__main__':
 
     seed_everything(cfg.seed)
 
+    exp_cfg: three_cfg.ExperimentConfig
+    exp_cfg = three_cfg.load_config("ImageDream/configs/imagedream-sd21-shading.yaml")
+
     def build_dataloader(phase):
         """
         Args:
@@ -38,9 +43,10 @@ if __name__ == '__main__':
         """
         opt = cfg.guidance
         if opt.name == 'imagedream' and phase == "train":
-            config = RandomMultiviewCameraDataModuleConfig()
-            dataset = RandomMultiviewCameraIterableDataset(config)
-            return DataLoader(dataset, batch_size=None, num_workers=0, collate_fn=dataset.collate)
+            import threestudio.data.random_multiview as mv
+            config = mv.parse_structured(mv.RandomMultiviewCameraDataModuleConfig, exp_cfg.data)
+            dataset = mv.RandomMultiviewCameraIterableDataset(config)
+            return DataLoader(dataset, batch_size=4, num_workers=0, collate_fn=dataset.collate)
         else:
             size = 4 if phase == 'val' else 100
             dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
