@@ -384,7 +384,8 @@ class DLMesh(nn.Module):
         normal = normal * alpha + (1 - alpha) * bg_color
 
         # smplx landmarks
-        smplx_landmarks = torch.bmm(F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0).unsqueeze(0),
+        smplx_landmarks = F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0)
+        smplx_landmarks = torch.bmm(smplx_landmarks.unsqueeze(0).repeat(batch, 1, 1),
                                     torch.transpose(mvp, 1, 2)).float()  # [B, N, 4]
         smplx_landmarks = smplx_landmarks[..., :2] / smplx_landmarks[..., 2:3]
         smplx_landmarks = smplx_landmarks * 0.5 + 0.5

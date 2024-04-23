@@ -86,8 +86,9 @@ class Trainer(object):
         # text prompt
         self.text_embeds = None
         if self.guidance is not None:
-            for p in self.guidance.parameters():
-                p.requires_grad = False
+            self.guidance.requires_grad_(False)
+            # for p in self.guidance.parameters():
+            #     p.requires_grad = False
             self.prepare_text_embeddings()
 
         # try out torch 2.0
@@ -205,6 +206,18 @@ class Trainer(object):
                 self.log_ptr.flush()  # write immediately to file
 
     def train_step(self, data, is_full_body):
+        mapping = {
+            "height": "H",
+            "width": "W",
+            "mvp_mtx": "mvp",
+        }
+        for k, v in mapping.items():
+            if k in data:
+                data[v] = data[k]
+                if not isinstance(data[k], torch.Tensor):
+                    data[v] = torch.tensor(data[k])
+                data[v] = data[v].to(self.device)
+
         do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
 
         if do_rgbd_loss:
@@ -233,8 +246,10 @@ class Trainer(object):
         #  Compute loss
         # ==============================================================================================
 
-        dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
-        dir_text_z = torch.cat(dir_text_z)
+        dir_text_z = None
+        if "camera_type" in data:
+            dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
+            dir_text_z = torch.cat(dir_text_z)
 
         out = self.model(rays_o, rays_d, mvp, data['H'], data['W'], shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
@@ -268,16 +283,16 @@ class Trainer(object):
                 loss = loss + lambda_depth * (1 - self.pearson(depth, gt_depth))
         else:
             # rgb sds
-            loss = self.guidance.train_step(dir_text_z, image_annel).mean()
+            loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"]).mean()
             if not self.dpt:
                 # normal sds
-                loss += self.guidance.train_step(dir_text_z, normal).mean()
+                loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"]).mean()
                 # latent mean sds
-                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()])).mean()
+                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()]), data=data, bg_color=out["bg_color"]).mean()
             else:
                 if p_iter < 0.3 or random.random() < 0.5:
                     # normal sds
-                    loss += self.guidance.train_step(dir_text_z, normal).mean()
+                    loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"]).mean()
                 elif self.dpt is not None :
                     # normal image loss
                     dpt_normal = self.dpt(image)

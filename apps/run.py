@@ -56,7 +56,9 @@ if __name__ == '__main__':
         opt = cfg.guidance
         if opt.name == 'imagedream':
             from lib.guidance.multiview_diffusion import MultiviewDiffusion
-            return MultiviewDiffusion()
+            from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
+            prompt_processor = StableDiffusionPromptProcessor(exp_cfg.system.prompt_processor)
+            return MultiviewDiffusion(exp_cfg.system.guidance, prompt_processor())
         elif opt.name == 'sd':
             from lib.guidance.sd import StableDiffusion
             return StableDiffusion(device, cfg.fp16, opt)

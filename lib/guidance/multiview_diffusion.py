@@ -3,24 +3,23 @@ from threestudio.models.prompt_processors.stable_diffusion_prompt_processor impo
 
 
 class MultiviewDiffusion(MultiviewDiffusionGuidance):
-    def __init__(self):
-        self.prompt_utils = StableDiffusionPromptProcessor({})
+    def __init__(self, cfg, prompt_utils):
+        super().__init__(cfg)
+        self.prompt_utils = prompt_utils
 
-    def parameters(self):
-        return []
+    # def parameters(self):
+    #     return []
 
     def get_text_embeds(self, prompts):
         pass
 
     def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, rgb_as_latents=False, data=None, bg_color=None):
+        rgb = pred_rgb.permute(0, 2, 3, 1)
         output = self.forward(
-            rgb=pred_rgb,
+            rgb=rgb,
             prompt_utils=self.prompt_utils,
-            elevation=data["polar"],
-            azimuth=data["azimuth"],
-            camera_distances=None,
-            c2w=data["poses"],
             comp_rgb_bg=bg_color,
-            text_embeddings=text_embeddings,
+            **data,
+            # text_embeddings=text_embeddings,
         )
         return output["loss_sds"]
