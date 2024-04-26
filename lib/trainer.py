@@ -545,6 +545,9 @@ class Trainer(object):
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
+            if hasattr(loader.dataset, "update_step"):
+                loader.dataset.update_step(self.epoch, self.global_step)
+
             if self.scheduler_update_every_step:
                 self.lr_scheduler.step()
 
