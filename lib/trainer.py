@@ -20,6 +20,10 @@ from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 
+from threestudio.data.random_multiview import get_mvp_matrix
+from imagedream.camera_utils import convert_blender_to_opengl
+
+
 class Trainer(object):
     def __init__(self,
                  name,  # name of this experiment
@@ -209,7 +213,6 @@ class Trainer(object):
         mapping = {
             "height": "H",
             "width": "W",
-            "mvp_mtx": "mvp",
         }
         for k, v in mapping.items():
             if k in data:
@@ -217,6 +220,16 @@ class Trainer(object):
                 if not isinstance(data[k], torch.Tensor):
                     data[v] = torch.tensor(data[k])
                 data[v] = data[v].to(self.device)
+
+        if "c2w" in data:
+            rot = torch.tensor([
+                [0, 1, 0, 0],
+                [-1, 0, 0, 0],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1],
+            ]).float().repeat(4, 1, 1)
+            c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
+            data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
 
         do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
 
