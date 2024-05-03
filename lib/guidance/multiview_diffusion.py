@@ -7,18 +7,16 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         super().__init__(cfg)
         self.prompt_utils = prompt_utils
 
-    # def parameters(self):
-    #     return []
-
     def get_text_embeds(self, prompts):
         pass
 
-    def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, rgb_as_latents=False, data=None, bg_color=None):
+    def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, rgb_as_latents=False, data=None, bg_color=None, is_full_body=True):
         rgb = pred_rgb.permute(0, 2, 3, 1)
         output = self.forward(
             rgb=rgb,
             prompt_utils=self.prompt_utils,
             comp_rgb_bg=bg_color,
+            is_full_body=is_full_body,
             **data,
             # text_embeddings=text_embeddings,
         )

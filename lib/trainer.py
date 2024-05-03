@@ -20,7 +20,7 @@ from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 
-from threestudio.data.random_multiview import get_mvp_matrix
+from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
 from imagedream.camera_utils import convert_blender_to_opengl
 
 
@@ -268,6 +268,10 @@ class Trainer(object):
         image = out['image'].permute(0, 3, 1, 2)
         normal = out['normal'].permute(0, 3, 1, 2)
         alpha = out['alpha'].permute(0, 3, 1, 2)
+        # cv2.imwrite("output/smplx_image.png", out["image"][0].detach().cpu().numpy() * 255)
+        # cv2.imwrite("output/smplx_normal.png", out["normal"][0].detach().cpu().numpy() * 255)
+        # import sys
+        # sys.exit()
 
         out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         image_annel = out_annel['image'].permute(0, 3, 1, 2)
@@ -296,16 +300,16 @@ class Trainer(object):
                 loss = loss + lambda_depth * (1 - self.pearson(depth, gt_depth))
         else:
             # rgb sds
-            loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"]).mean()
+            loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
             if not self.dpt:
                 # normal sds
-                loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"]).mean()
+                loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
                 # latent mean sds
-                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()]), data=data, bg_color=out["bg_color"]).mean()
+                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()]), data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
             else:
                 if p_iter < 0.3 or random.random() < 0.5:
                     # normal sds
-                    loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"]).mean()
+                    loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
                 elif self.dpt is not None :
                     # normal image loss
                     dpt_normal = self.dpt(image)
@@ -441,8 +445,14 @@ class Trainer(object):
                 if random.random() < self.opt.train_face_ratio:
                     train_loader.dataset.full_body = False
                     face_center, face_scale = self.model.get_mesh_center_scale("face")
+
+                    scale = 10
+                    if isinstance(train_loader.dataset, RandomMultiviewCameraIterableDataset):
+                        face_center = torch.tensor([face_center[0], -face_center[2], face_center[1]])
+                        scale = 1
+
                     train_loader.dataset.face_center = face_center
-                    train_loader.dataset.face_scale = face_scale.item() * 10
+                    train_loader.dataset.face_scale = face_scale.item() * scale
 
                 else:
                     train_loader.dataset.full_body = True
