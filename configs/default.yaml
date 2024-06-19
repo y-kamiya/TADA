@@ -76,6 +76,7 @@ model:
   lock_expression: False
   albedo_res: 1024
   init_empty_tex: True
+  init_with_tpose: False
   replace_hands_eyes: True
   ssaa: 2
 smpl:
