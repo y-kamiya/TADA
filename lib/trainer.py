@@ -269,7 +269,8 @@ class Trainer(object):
             dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
             dir_text_z = torch.cat(dir_text_z)
 
-        out = self.model(rays_o, rays_d, mvp, data['H'], data['W'], shading='albedo')
+        with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+            out = self.model(rays_o, rays_d, mvp, data['H'], data['W'], shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
         normal = out['normal'].permute(0, 3, 1, 2)
         alpha = out['alpha'].permute(0, 3, 1, 2)
@@ -278,7 +279,8 @@ class Trainer(object):
         # import sys
         # sys.exit()
 
-        out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
+        with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+            out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         image_annel = out_annel['image'].permute(0, 3, 1, 2)
         normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
         alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)

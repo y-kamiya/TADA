@@ -1,7 +1,7 @@
 name: 'default'
 seed: 0
 stage: "geo"
-fp16: False
+fp16: True
 text: ""
 negative: ""
 test: False
