@@ -1,14 +1,15 @@
 #!/bin/bash -ex
 
-pip install --upgrade pip 
-pip install torch==1.12.1+cu116 torchvision==0.13.1+cu116 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu116
-pip install -r requirements.txt
+pip install --upgrade pip  
+pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt -r ImageDream/requirements.txt
  
 pushd smplx
 python setup.py install
 popd
 
-pip install cuda-python pytorch-lightning omegaconf
+pip install -e ImageDream
+pip install -e ImageDream/extern/ImageDream
 
 # can not download due to permission
 # pip install gdown 

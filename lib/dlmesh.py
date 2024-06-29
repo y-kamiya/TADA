@@ -92,6 +92,8 @@ class DLMesh(nn.Module):
             self.betas = torch.as_tensor(smplx_params["betas"]).to(self.device)
             self.jaw_pose = torch.as_tensor(smplx_params["jaw_pose"]).to(self.device)
             self.body_pose = torch.as_tensor(smplx_params["body_pose"]).to(self.device)
+            if opt.init_with_tpose:
+                self.body_pose.fill_(0)
             self.body_pose = self.body_pose.view(-1, 3)
             self.body_pose[[0, 1, 3, 4, 6, 7], :2] *= 0
             self.body_pose = self.body_pose.view(1, -1)
@@ -384,7 +386,8 @@ class DLMesh(nn.Module):
         normal = normal * alpha + (1 - alpha) * bg_color
 
         # smplx landmarks
-        smplx_landmarks = torch.bmm(F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0).unsqueeze(0),
+        smplx_landmarks = F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0)
+        smplx_landmarks = torch.bmm(smplx_landmarks.unsqueeze(0).repeat(batch, 1, 1),
                                     torch.transpose(mvp, 1, 2)).float()  # [B, N, 4]
         smplx_landmarks = smplx_landmarks[..., :2] / smplx_landmarks[..., 2:3]
         smplx_landmarks = smplx_landmarks * 0.5 + 0.5
@@ -394,4 +397,5 @@ class DLMesh(nn.Module):
             "alpha": alpha,
             "normal": normal,
             "smplx_landmarks": smplx_landmarks,
+            "bg_color": bg_color,
         }

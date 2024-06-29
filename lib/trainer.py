@@ -20,6 +20,10 @@ from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 
+from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
+from imagedream.camera_utils import convert_blender_to_opengl
+
+
 class Trainer(object):
     def __init__(self,
                  name,  # name of this experiment
@@ -86,14 +90,15 @@ class Trainer(object):
         # text prompt
         self.text_embeds = None
         if self.guidance is not None:
-            for p in self.guidance.parameters():
-                p.requires_grad = False
+            self.guidance.requires_grad_(False)
+            # for p in self.guidance.parameters():
+            #     p.requires_grad = False
             self.prepare_text_embeddings()
 
         # try out torch 2.0
-        if torch.__version__[0] == '2':
-            self.model = torch.compile(self.model)
-            self.guidance = torch.compile(self.guidance)
+        # if torch.__version__[0] == '2':
+        #     self.model = torch.compile(self.model)
+        #     self.guidance = torch.compile(self.guidance)
 
         if isinstance(criterion, nn.Module):
             criterion.to(self.device)
@@ -205,6 +210,27 @@ class Trainer(object):
                 self.log_ptr.flush()  # write immediately to file
 
     def train_step(self, data, is_full_body):
+        mapping = {
+            "height": "H",
+            "width": "W",
+        }
+        for k, v in mapping.items():
+            if k in data:
+                data[v] = data[k]
+                if not isinstance(data[k], torch.Tensor):
+                    data[v] = torch.tensor(data[k])
+                data[v] = data[v].to(self.device)
+
+        if "c2w" in data:
+            rot = torch.tensor([
+                [0, 1, 0, 0],
+                [-1, 0, 0, 0],
+                [0, 0, 1, 0],
+                [0, 0, 0, 1],
+            ]).float().repeat(4, 1, 1)
+            c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
+            data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
+
         do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
 
         if do_rgbd_loss:
@@ -233,13 +259,19 @@ class Trainer(object):
         #  Compute loss
         # ==============================================================================================
 
-        dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
-        dir_text_z = torch.cat(dir_text_z)
+        dir_text_z = None
+        if "camera_type" in data:
+            dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
+            dir_text_z = torch.cat(dir_text_z)
 
         out = self.model(rays_o, rays_d, mvp, data['H'], data['W'], shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
         normal = out['normal'].permute(0, 3, 1, 2)
         alpha = out['alpha'].permute(0, 3, 1, 2)
+        # cv2.imwrite("output/smplx_image.png", out["image"][0].detach().cpu().numpy() * 255)
+        # cv2.imwrite("output/smplx_normal.png", out["normal"][0].detach().cpu().numpy() * 255)
+        # import sys
+        # sys.exit()
 
         out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         image_annel = out_annel['image'].permute(0, 3, 1, 2)
@@ -268,16 +300,16 @@ class Trainer(object):
                 loss = loss + lambda_depth * (1 - self.pearson(depth, gt_depth))
         else:
             # rgb sds
-            loss = self.guidance.train_step(dir_text_z, image_annel).mean()
+            loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
             if not self.dpt:
                 # normal sds
-                loss += self.guidance.train_step(dir_text_z, normal).mean()
+                loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
                 # latent mean sds
-                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()])).mean()
+                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()]), data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
             else:
                 if p_iter < 0.3 or random.random() < 0.5:
                     # normal sds
-                    loss += self.guidance.train_step(dir_text_z, normal).mean()
+                    loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
                 elif self.dpt is not None :
                     # normal image loss
                     dpt_normal = self.dpt(image)
@@ -413,8 +445,14 @@ class Trainer(object):
                 if random.random() < self.opt.train_face_ratio:
                     train_loader.dataset.full_body = False
                     face_center, face_scale = self.model.get_mesh_center_scale("face")
+
+                    scale = 10
+                    if isinstance(train_loader.dataset, RandomMultiviewCameraIterableDataset):
+                        face_center = torch.tensor([face_center[0], -face_center[2], face_center[1]])
+                        scale = 1
+
                     train_loader.dataset.face_center = face_center
-                    train_loader.dataset.face_scale = face_scale.item() * 10
+                    train_loader.dataset.face_scale = face_scale.item() * scale
 
                 else:
                     train_loader.dataset.full_body = True
@@ -530,6 +568,9 @@ class Trainer(object):
             self.scaler.step(self.optimizer)
             self.scaler.update()
 
+            if hasattr(loader.dataset, "update_step"):
+                loader.dataset.update_step(self.epoch, self.global_step)
+
             if self.scheduler_update_every_step:
                 self.lr_scheduler.step()
 
@@ -548,6 +589,9 @@ class Trainer(object):
                 else:
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f})")
                 pbar.update(loader.batch_size)
+
+                if len(loader) <= self.local_step:
+                    break
 
         if self.ema is not None:
             self.ema.update()

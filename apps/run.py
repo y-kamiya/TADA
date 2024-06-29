@@ -8,6 +8,8 @@ from lib.trainer import *
 from lib.dlmesh import DLMesh
 from lib.common.utils import load_config
 
+import threestudio.utils.config as three_cfg
+
 torch.autograd.set_detect_anomaly(True)
 
 if __name__ == '__main__':
@@ -30,19 +32,34 @@ if __name__ == '__main__':
 
     seed_everything(cfg.seed)
 
+    exp_cfg: three_cfg.ExperimentConfig
+    exp_cfg = three_cfg.load_config("ImageDream/configs/imagedream-sd21-shading.yaml")
+
     def build_dataloader(phase):
         """
         Args:
             phase: str one of ['train', 'test' 'val']
         Returns:
         """
-        size = 4 if phase == 'val' else 100
-        dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
-        return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+        opt = cfg.guidance
+        if opt.name == 'imagedream' and phase == "train":
+            import threestudio.data.random_multiview as mv
+            config = mv.parse_structured(mv.RandomMultiviewCameraDataModuleConfig, exp_cfg.data)
+            dataset = mv.RandomMultiviewCameraIterableDataset(config)
+            return DataLoader(dataset, batch_size=4, num_workers=0, collate_fn=dataset.collate)
+        else:
+            size = 4 if phase == 'val' else 100
+            dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
+            return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
 
     def configure_guidance():
         opt = cfg.guidance
-        if opt.name == 'sd':
+        if opt.name == 'imagedream':
+            from lib.guidance.multiview_diffusion import MultiviewDiffusion
+            from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
+            prompt_processor = StableDiffusionPromptProcessor(exp_cfg.system.prompt_processor)
+            return MultiviewDiffusion(exp_cfg.system.guidance, prompt_processor())
+        elif opt.name == 'sd':
             from lib.guidance.sd import StableDiffusion
             return StableDiffusion(device, cfg.fp16, opt)
         elif opt.name == 'if':
