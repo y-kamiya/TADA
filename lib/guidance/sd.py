@@ -63,7 +63,7 @@ class StableDiffusion(nn.Module):
         pipe_kargs = {
             "use_safetensors": True,
             "load_safety_checker": False,
-            "torch_dtype": self.precision_t,
+            "torch_dtype": torch.float16,
         }
 
         if opt.ckpt is not None:
