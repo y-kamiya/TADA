@@ -155,6 +155,11 @@ class Trainer(object):
         self.log(
             f'[INFO] Trainer: {self.name} | {self.time_stamp} | {self.device} | {"fp16" if self.fp16 else "fp32"} | {self.workspace}')
         self.log(f'[INFO] #parameters: {sum([p.numel() for p in model.parameters() if p.requires_grad])}')
+        for name, p in model.named_parameters():
+            if p.requires_grad:
+                self.log(f"{name}: {p.numel()}")
+        import sys
+        sys.exit()
 
         if self.workspace is not None:
             if self.use_checkpoint == "scratch":
@@ -561,50 +566,61 @@ class Trainer(object):
 
         self.local_step = 0
 
-        for data in loader:
+        import torch.autograd.profiler as profiler
+        with profiler.profile(record_shapes=True, profile_memory=True, use_cuda=True) as prof:
+            for data in loader:
 
-            self.local_step += 1
-            self.global_step += 1
+                self.local_step += 1
+                self.global_step += 1
 
-            self.optimizer.zero_grad()
+                with profiler.record_function("zero_grad"):
+                    self.optimizer.zero_grad()
 
-            with torch.cuda.amp.autocast(enabled=self.fp16):
-                pred_rgbs, loss = self.train_step(data, loader.dataset.full_body)
+                with torch.cuda.amp.autocast(enabled=self.fp16):
+                    with profiler.record_function("forward"):
+                        pred_rgbs, loss = self.train_step(data, loader.dataset.full_body)
 
-            if self.global_step % 20 == 0:
-                pred = cv2.cvtColor(pred_rgbs, cv2.COLOR_RGB2BGR)
-                save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.png')
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                cv2.imwrite(save_path, pred)
+                if self.global_step % 20 == 0:
+                    pred = cv2.cvtColor(pred_rgbs, cv2.COLOR_RGB2BGR)
+                    save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.png')
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                    cv2.imwrite(save_path, pred)
 
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+                with profiler.record_function("backward"):
+                    self.scaler.scale(loss).backward()
+                with profiler.record_function("optimize"):
+                    self.scaler.step(self.optimizer)
+                with profiler.record_function("update"):
+                    self.scaler.update()
 
-            if hasattr(loader.dataset, "update_step"):
-                loader.dataset.update_step(self.epoch, self.global_step)
-
-            if self.scheduler_update_every_step:
-                self.lr_scheduler.step()
-
-            loss_val = loss.item()
-            total_loss += loss_val
-
-            if self.local_rank == 0:
-                if self.use_tensorboardX:
-                    self.writer.add_scalar("train/loss", loss_val, self.global_step)
-                    self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
+                if hasattr(loader.dataset, "update_step"):
+                    loader.dataset.update_step(self.epoch, self.global_step)
 
                 if self.scheduler_update_every_step:
-                    pbar.set_description(
-                        f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f}), "
-                        f"lr={self.optimizer.param_groups[0]['lr']:.6f}, ")
-                else:
-                    pbar.set_description(f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f})")
-                pbar.update(loader.batch_size)
+                    self.lr_scheduler.step()
 
-                if len(loader) <= self.local_step:
-                    break
+                loss_val = loss.item()
+                total_loss += loss_val
+
+                if self.local_rank == 0:
+                    if self.use_tensorboardX:
+                        self.writer.add_scalar("train/loss", loss_val, self.global_step)
+                        self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
+
+                    if self.scheduler_update_every_step:
+                        pbar.set_description(
+                            f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f}), "
+                            f"lr={self.optimizer.param_groups[0]['lr']:.6f}, ")
+                    else:
+                        pbar.set_description(f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f})")
+                    pbar.update(loader.batch_size)
+
+                    if len(loader) <= self.local_step:
+                        break
+
+        print(prof.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=100))
+        import sys
+        sys.exit()
 
         if self.ema is not None:
             self.ema.update()
