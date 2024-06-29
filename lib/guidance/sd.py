@@ -51,6 +51,8 @@ class StableDiffusion(nn.Module):
         if opt.hf_key is not None:
             print(f'[INFO] using hugging face custom model key: {opt.hf_key}')
             model_key = opt.hf_key
+        elif self.sd_version == '2.1-768':
+            model_key = "stabilityai/stable-diffusion-2-1"
         elif self.sd_version == '2.1':
             model_key = "stabilityai/stable-diffusion-2-1-base"
         elif self.sd_version == '2.0':
@@ -122,7 +124,7 @@ class StableDiffusion(nn.Module):
             latents = F.interpolate(pred_rgb, (64, 64), mode='bilinear', align_corners=False)
             latents = latents * 2 - 1
         else:
-            pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
+            pred_rgb_512 = F.interpolate(pred_rgb, (768, 768), mode='bilinear', align_corners=False)
             latents = self.encode_imgs(pred_rgb_512)
 
         latents = torch.mean(latents, keepdim=True, dim=0)
