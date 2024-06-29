@@ -39,8 +39,8 @@ training:
   lambda_depth: 10
   use_dpt: False
 data:
-  h: 512
-  w: 512
+  h: 768
+  w: 768
   H: 800
   W: 800
   near: 0.01
