@@ -25,7 +25,7 @@ training:
   anneal_tex_reso: False
   optim: 'adan'
   train_face_ratio: 0.3
-  eval_interval: 1
+  eval_interval: 10
   workspace: "../data/tada"
   perpneg: False
   geo_loss: []
