@@ -66,7 +66,6 @@ class StableDiffusion(nn.Module):
             # "torch_dtype": torch.bfloat16,
         }
 
-        print(opt)
         if opt.ckpt is not None:
             self.pipeline = StableDiffusionPipeline.from_single_file(opt.ckpt).to(self.device)
         else:

@@ -172,6 +172,11 @@ class Trainer(object):
                 self.log(f"[INFO] Loading {self.use_checkpoint} ...")
                 self.load_checkpoint(self.use_checkpoint)
 
+    def save_config(self, cfg):
+        cfg_path = os.path.join(self.workspace, 'config.yaml')
+        with open(cfg_path, "w") as f:
+            print(cfg, file=f)
+    
     # calculate the text embeddings.
     def prepare_text_embeddings(self):
         if self.text is None:

@@ -32,8 +32,10 @@ if __name__ == '__main__':
 
     seed_everything(cfg.seed)
 
-    exp_cfg: three_cfg.ExperimentConfig
-    exp_cfg = three_cfg.load_config("ImageDream/configs/imagedream-sd21-shading.yaml")
+    if cfg.guidance.name == 'imagedream':
+        exp_cfg: three_cfg.ExperimentConfig
+        exp_cfg = three_cfg.load_config("ImageDream/configs/imagedream-sd21-shading.yaml")
+
 
     def build_dataloader(phase):
         """
@@ -125,6 +127,8 @@ if __name__ == '__main__':
                           lr_scheduler=scheduler,
                           scheduler_update_every_step=True
                           )
+        trainer.save_config(cfg)
+
         if os.path.exists(cfg.data.image):
             trainer.default_view_data = train_loader.dataset.get_default_view_data()
 
