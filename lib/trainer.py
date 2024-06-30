@@ -158,8 +158,6 @@ class Trainer(object):
         for name, p in model.named_parameters():
             if p.requires_grad:
                 self.log(f"{name}: {p.numel()}")
-        import sys
-        sys.exit()
 
         if self.workspace is not None:
             if self.use_checkpoint == "scratch":
@@ -566,19 +564,23 @@ class Trainer(object):
 
         self.local_step = 0
 
-        import torch.autograd.profiler as profiler
-        with profiler.profile(record_shapes=True, profile_memory=True, use_cuda=True) as prof:
+        with torch.profiler.profile(record_shapes=True,
+                              profile_memory=True,
+                              use_cuda=True,
+                              with_stack=True,
+                              on_trace_ready=torch.profiler.tensorboard_trace_handler("./profile"),
+                              schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
+        ) as prof:
             for data in loader:
+                prof.step()
 
                 self.local_step += 1
                 self.global_step += 1
 
-                with profiler.record_function("zero_grad"):
-                    self.optimizer.zero_grad()
+                self.optimizer.zero_grad()
 
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    with profiler.record_function("forward"):
-                        pred_rgbs, loss = self.train_step(data, loader.dataset.full_body)
+                    pred_rgbs, loss = self.train_step(data, loader.dataset.full_body)
 
                 if self.global_step % 20 == 0:
                     pred = cv2.cvtColor(pred_rgbs, cv2.COLOR_RGB2BGR)
@@ -586,12 +588,9 @@ class Trainer(object):
                     os.makedirs(os.path.dirname(save_path), exist_ok=True)
                     cv2.imwrite(save_path, pred)
 
-                with profiler.record_function("backward"):
-                    self.scaler.scale(loss).backward()
-                with profiler.record_function("optimize"):
-                    self.scaler.step(self.optimizer)
-                with profiler.record_function("update"):
-                    self.scaler.update()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
                 if hasattr(loader.dataset, "update_step"):
                     loader.dataset.update_step(self.epoch, self.global_step)
@@ -618,7 +617,6 @@ class Trainer(object):
                     if len(loader) <= self.local_step:
                         break
 
-        print(prof.key_averages(group_by_input_shape=True).table(sort_by="cuda_memory_usage", row_limit=100))
         import sys
         sys.exit()
 
