@@ -6,6 +6,7 @@ model:
   lock_tex: False
   skip_bg: True
   init_empty_tex: True
+  init_with_tpose: True
   albedo_res: 2048
   mesh: data/init_body/fit_smplx_dense.obj
 training:
@@ -20,5 +21,3 @@ data:
   theta_range: [60, 90]
   head_phi_range: [-30, 30]
   head_theta_range: [75, 85]
-model:
-  init_with_tpose: True
