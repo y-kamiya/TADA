@@ -63,7 +63,7 @@ class StableDiffusion(nn.Module):
         pipe_kargs = {
             "use_safetensors": True,
             "load_safety_checker": False,
-            # "torch_dtype": torch.bfloat16,
+            "torch_dtype": self.precision_t,
         }
 
         if opt.ckpt is not None:
@@ -268,9 +268,10 @@ class StableDiffusion(nn.Module):
 
     def encode_imgs(self, imgs):
         # imgs: [B, 3, H, W]
-        imgs = 2 * imgs - 1
-        posterior = self.vae.encode(imgs).latent_dist
-        latents = posterior.sample() * self.vae.config.scaling_factor
+        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float32):
+            imgs = 2 * imgs - 1
+            posterior = self.vae.encode(imgs).latent_dist
+            latents = posterior.sample() * self.vae.config.scaling_factor
 
         return latents
 
