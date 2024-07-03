@@ -50,9 +50,12 @@ if __name__ == '__main__':
             dataset = mv.RandomMultiviewCameraIterableDataset(config)
             return DataLoader(dataset, batch_size=4, num_workers=0, collate_fn=dataset.collate)
         else:
+            batch_size = 1
+            if phase == "train":
+                batch_size = 2
             size = 4 if phase == 'val' else 100
             dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
-            return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+            return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     def configure_guidance():
         opt = cfg.guidance

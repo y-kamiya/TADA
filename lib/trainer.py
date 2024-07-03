@@ -252,8 +252,8 @@ class Trainer(object):
 
             def make_divisible(x, y): return x + (y - x % y)
 
-            H = max(make_divisible(int(H * scale), 16), 32)
-            W = max(make_divisible(int(W * scale), 16), 32)
+            H_annel = max(make_divisible(int(H[0] * scale), 16), 32)
+            W_annel = max(make_divisible(int(W[0] * scale), 16), 32)
 
         if do_rgbd_loss and self.opt.known_view_noise_scale > 0:
             noise_scale = self.opt.known_view_noise_scale  # * (1 - self.global_step / self.opt.iters)
@@ -266,11 +266,13 @@ class Trainer(object):
 
         dir_text_z = None
         if "camera_type" in data:
-            dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
-            dir_text_z = torch.cat(dir_text_z)
+            bs = data["H"].shape[0]
+            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
+            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
+            dir_text_z = torch.cat([uncond, cond])
 
         with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
-            out = self.model(rays_o, rays_d, mvp, data['H'], data['W'], shading='albedo')
+            out = self.model(rays_o, rays_d, mvp, data['H'][0], data['W'][0], shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
         normal = out['normal'].permute(0, 3, 1, 2)
         alpha = out['alpha'].permute(0, 3, 1, 2)
@@ -280,7 +282,7 @@ class Trainer(object):
         # sys.exit()
 
         with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
-            out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
+            out_annel = self.model(rays_o, rays_d, mvp, H_annel, W_annel, shading='albedo')
         image_annel = out_annel['image'].permute(0, 3, 1, 2)
         normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
         alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
