@@ -15,6 +15,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from rich.console import Console
 from torch_ema import ExponentialMovingAverage
+from uuid import uuid4
 
 from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
@@ -63,6 +64,9 @@ class Trainer(object):
         self.world_size = world_size
 
         self.workspace = os.path.join(opt.workspace, self.name, self.text)
+        if os.path.exists(self.workspace):
+            self.workspace = os.path.join(opt.workspace, self.name, self.text + str(uuid4())[:8])
+
         self.ema_decay = ema_decay
         self.fp16 = fp16
         self.best_mode = best_mode
