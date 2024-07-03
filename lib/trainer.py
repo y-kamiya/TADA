@@ -569,7 +569,7 @@ class Trainer(object):
                               use_cuda=True,
                               with_stack=True,
                               on_trace_ready=torch.profiler.tensorboard_trace_handler("./profile"),
-                              schedule=torch.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
+                              schedule=torch.profiler.schedule(wait=5, warmup=2, active=3, repeat=1),
         ) as prof:
             for data in loader:
                 prof.step()
