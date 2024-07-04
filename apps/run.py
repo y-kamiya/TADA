@@ -50,7 +50,7 @@ if __name__ == '__main__':
             dataset = mv.RandomMultiviewCameraIterableDataset(config)
             return DataLoader(dataset, batch_size=cfg.batch_size, num_workers=0, collate_fn=dataset.collate)
         else:
-            size = 4 if phase == 'val' else 100
+            size = 4 if phase == 'val' else 40
             batch_size = 1 if phase == 'val' else cfg.batch_size
             dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
             return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
