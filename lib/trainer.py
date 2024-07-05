@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import torchvision.transforms.functional as VF
 # from pytorch3d.ops.knn import knn_points
 # from pytorch3d.loss import chamfer_distance
 import torch.distributed as dist
@@ -285,11 +286,11 @@ class Trainer(object):
         # import sys
         # sys.exit()
 
-        with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
-            out_annel = self.model(rays_o, rays_d, mvp, H_annel, W_annel, shading='albedo')
-        image_annel = out_annel['image'].permute(0, 3, 1, 2)
-        normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
-        alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
+        # with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+        #     out_annel = self.model(rays_o, rays_d, mvp, H_annel, W_annel, shading='albedo')
+        # image_annel = out_annel['image'].permute(0, 3, 1, 2)
+        # normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
+        # alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
 
         pred = torch.cat([out['image'], out['normal']], dim=2)
         pred = (pred[0].detach().cpu().numpy() * 255).astype(np.uint8)
@@ -313,6 +314,7 @@ class Trainer(object):
                 loss = loss + lambda_depth * (1 - self.pearson(depth, gt_depth))
         else:
             # rgb sds
+            image_annel = VF.resize(image, (H_annel, W_annel), VF.InterpolationMode.BICUBIC)
             loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
             if not self.dpt:
                 # normal sds
