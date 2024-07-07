@@ -52,6 +52,9 @@ class StableDiffusion(nn.Module):
         if opt.hf_key is not None:
             print(f'[INFO] using hugging face custom model key: {opt.hf_key}')
             model_key = opt.hf_key
+        elif self.sd_version == 'sdxl':
+            model_key = "stabilityai/stable-diffusion-xl-base-1.0"
+            self.resolution = 1024
         elif self.sd_version == '2.1-768':
             model_key = "stabilityai/stable-diffusion-2-1"
             self.resolution = 768
@@ -99,6 +102,8 @@ class StableDiffusion(nn.Module):
         self.max_step = int(self.num_train_timesteps * opt.t_range[1])
         self.alphas = self.scheduler.alphas_cumprod.to(self.device)  # for convenience
 
+        self.image_size = [self.resolution, self.resolution]
+
         print(f'[INFO] loaded stable diffusion!')
 
     @torch.no_grad()
@@ -141,7 +146,8 @@ class StableDiffusion(nn.Module):
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
             tt = torch.cat([t] * 2)
-            noise_pred = self.unet(latent_model_input, tt, encoder_hidden_states=text_embeddings).sample
+            added_cond_kwargs = self.build_added_cond_kwargs(text_embeddings)
+            noise_pred = self.unet(latent_model_input, tt, encoder_hidden_states=text_embeddings, added_cond_kwargs=added_cond_kwargs).sample
 
         # perform guidance (high scale from paper!)
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -165,6 +171,21 @@ class StableDiffusion(nn.Module):
         loss = 0.5 * F.mse_loss(latents, (latents - grad).detach(), reduction="sum") / latents.shape[0]
 
         return loss
+
+    def build_added_cond_kwargs(self, text_embeddings):
+        original_size = self.image_size
+        crops_coords_top_left = [0, 0]
+        target_size = self.image_size
+
+        add_time_ids = list(original_size + crops_coords_top_left + target_size)
+        add_time_ids = torch.tensor([add_time_ids], dtype=self.precision_t)
+        add_time_ids = torch.cat([add_time_ids, add_time_ids], dim=0)
+        print(add_time_ids.shape)
+
+        return {
+            "text_embeds": text_embeddings,
+            "time_ids": add_time_ids.to(self.device),
+        }
 
     def train_step_perpneg(self, text_embeddings, weights, pred_rgb, guidance_scale=100, as_latent=False, grad_scale=1,
                            save_guidance_path=None):
@@ -248,7 +269,8 @@ class StableDiffusion(nn.Module):
 
                 # predict the noise residual
                 with torch.no_grad():
-                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings)['sample']
+                    added_cond_kwargs = self.build_added_cond_kwargs(text_embeddings)
+                    noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings, added_cond_kwargs=added_cond_kwargs)['sample']
 
                 # perform guidance
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
@@ -279,7 +301,7 @@ class StableDiffusion(nn.Module):
 
         return latents
 
-    def prompt_to_img(self, prompts, negative_prompts='', height=512, width=512, num_inference_steps=50,
+    def prompt_to_img(self, prompts, negative_prompts='', height=0, width=0, num_inference_steps=50,
                       guidance_scale=7.5, latents=None):
 
         if isinstance(prompts, str):
@@ -287,6 +309,9 @@ class StableDiffusion(nn.Module):
 
         if isinstance(negative_prompts, str):
             negative_prompts = [negative_prompts]
+
+        height = self.resolution if height == 0 else height
+        width = self.resolution if width == 0 else width
 
         # Prompts -> text embeds
         uncon_embeds = self.get_text_embeds(negative_prompts)
@@ -315,8 +340,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--prompt', type=str)
     parser.add_argument('--negative', default='bad anatomy', type=str)
-    parser.add_argument('--sd_version', type=str, default='2.1', choices=['1.5', '2.0', '2.1'],
-                        help="stable diffusion version")
+    parser.add_argument('--sd_version', type=str, default='2.1', help="stable diffusion version")
     parser.add_argument('--hf_key', type=str, default=None, help="hugging face Stable diffusion model key")
     parser.add_argument('-H', type=int, default=512)
     parser.add_argument('-W', type=int, default=512)
