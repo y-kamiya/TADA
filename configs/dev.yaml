@@ -3,6 +3,8 @@ fp16: True
 batch_size: 1
 stage: geo_tex
 test: False
+guidance:
+  sd_version: "sdxl"
 model:
   lock_geo: False
   lock_tex: False
