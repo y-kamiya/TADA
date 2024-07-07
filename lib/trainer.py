@@ -246,7 +246,7 @@ class Trainer(object):
         if do_rgbd_loss:
             data = self.default_view_data
 
-        H, W = data['H'], data['W']
+        H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
@@ -257,8 +257,8 @@ class Trainer(object):
 
             def make_divisible(x, y): return x + (y - x % y)
 
-            H_annel = max(make_divisible(int(H[0] * scale), 16), 32)
-            W_annel = max(make_divisible(int(W[0] * scale), 16), 32)
+            H = max(make_divisible(int(H * scale), 16), 32)
+            W = max(make_divisible(int(W * scale), 16), 32)
 
         if do_rgbd_loss and self.opt.known_view_noise_scale > 0:
             noise_scale = self.opt.known_view_noise_scale  # * (1 - self.global_step / self.opt.iters)
@@ -287,10 +287,11 @@ class Trainer(object):
         # sys.exit()
 
         # with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
-        #     out_annel = self.model(rays_o, rays_d, mvp, H_annel, W_annel, shading='albedo')
+        #     out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         # image_annel = out_annel['image'].permute(0, 3, 1, 2)
         # normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
         # alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
+        image_annel = VF.resize(image, (H, W), VF.InterpolationMode.BICUBIC)
 
         pred = torch.cat([out['image'], out['normal']], dim=2)
         pred = (pred[0].detach().cpu().numpy() * 255).astype(np.uint8)
@@ -314,7 +315,6 @@ class Trainer(object):
                 loss = loss + lambda_depth * (1 - self.pearson(depth, gt_depth))
         else:
             # rgb sds
-            image_annel = VF.resize(image, (H_annel, W_annel), VF.InterpolationMode.BICUBIC)
             loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
             if not self.dpt:
                 # normal sds
