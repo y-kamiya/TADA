@@ -120,10 +120,13 @@ class StableDiffusion(nn.Module):
                                     padding='max_length',
                                     max_length=self.tokenizer.model_max_length,
                                     truncation=True,
-                                    return_tensors='pt')
-        text_embeddings = self.text_encoder(text_input.input_ids.to(self.device))[0]
+                                    return_tensors='pt').to(self.device)
 
-        return text_embeddings
+        text_embeds = self.text_encoder(text_input.input_ids, output_hidden_states=True)
+        pooled_text_embeds = text_embeds.pooler_output
+        text_embeddings = text_embeds.hidden_states[-2]
+
+        return text_embeddings, pooled_text_embeds
 
     def train_step(self, text_embeddings, pred_rgb, guidance_scale=100, rgb_as_latents=False, data=None, bg_color=None, is_full_body=True):
         if rgb_as_latents:
@@ -172,7 +175,7 @@ class StableDiffusion(nn.Module):
 
         return loss
 
-    def build_added_cond_kwargs(self, text_embeddings):
+    def build_added_cond_kwargs(self, pooled_text_embeds):
         original_size = self.image_size
         crops_coords_top_left = [0, 0]
         target_size = self.image_size
@@ -180,10 +183,11 @@ class StableDiffusion(nn.Module):
         add_time_ids = list(original_size + crops_coords_top_left + target_size)
         add_time_ids = torch.tensor([add_time_ids], dtype=self.precision_t)
         add_time_ids = torch.cat([add_time_ids, add_time_ids], dim=0)
+        print(pooled_text_embeds.shape)
         print(add_time_ids.shape)
 
         return {
-            "text_embeds": text_embeddings,
+            "text_embeds": pooled_text_embeds,
             "time_ids": add_time_ids.to(self.device),
         }
 
@@ -254,7 +258,7 @@ class StableDiffusion(nn.Module):
         return loss
 
     def produce_latents(self, text_embeddings, height=512, width=512, num_inference_steps=50, guidance_scale=7.5,
-                        latents=None):
+                        latents=None, added_cond_kwargs=None):
 
         if latents is None:
             latents = torch.randn((text_embeddings.shape[0] // 2, self.unet.in_channels, height // 8, width // 8),
@@ -269,7 +273,6 @@ class StableDiffusion(nn.Module):
 
                 # predict the noise residual
                 with torch.no_grad():
-                    added_cond_kwargs = self.build_added_cond_kwargs(text_embeddings)
                     noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings, added_cond_kwargs=added_cond_kwargs)['sample']
 
                 # perform guidance
@@ -314,14 +317,18 @@ class StableDiffusion(nn.Module):
         width = self.resolution if width == 0 else width
 
         # Prompts -> text embeds
-        uncon_embeds = self.get_text_embeds(negative_prompts)
-        text_embeds = self.get_text_embeds(prompts)  # [2, 77, 768]
+        uncon_embeds, pooled_uncon_embeds = self.get_text_embeds(negative_prompts)
+        text_embeds, pooled_text_embeds = self.get_text_embeds(prompts)  # [2, 77, 768]
         text_embeds = torch.cat([uncon_embeds, text_embeds])
+        pooled_text_embeds = torch.cat([pooled_uncon_embeds, pooled_text_embeds])
+
+        added_cond_kwargs = self.build_added_cond_kwargs(pooled_text_embeds)
 
         # Text embeds -> img latents
         latents = self.produce_latents(text_embeds, height=height, width=width, latents=latents,
                                        num_inference_steps=num_inference_steps,
-                                       guidance_scale=guidance_scale)  # [1, 4, 64, 64]
+                                       guidance_scale=guidance_scale,
+                                       added_cond_kwargs=added_cond_kwargs)  # [1, 4, 64, 64]
 
         # Img latents -> imgs
         imgs = self.decode_latents(latents)  # [1, 3, 512, 512]
