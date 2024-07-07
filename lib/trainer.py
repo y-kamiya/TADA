@@ -10,11 +10,13 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+import torchvision.transforms.functional as VF
 # from pytorch3d.ops.knn import knn_points
 # from pytorch3d.loss import chamfer_distance
 import torch.distributed as dist
 from rich.console import Console
 from torch_ema import ExponentialMovingAverage
+from uuid import uuid4
 
 from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
@@ -63,6 +65,9 @@ class Trainer(object):
         self.world_size = world_size
 
         self.workspace = os.path.join(opt.workspace, self.name, self.text)
+        if os.path.exists(self.workspace):
+            self.workspace = os.path.join(opt.workspace, self.name, self.text + str(uuid4())[:8])
+
         self.ema_decay = ema_decay
         self.fp16 = fp16
         self.best_mode = best_mode
@@ -241,7 +246,7 @@ class Trainer(object):
         if do_rgbd_loss:
             data = self.default_view_data
 
-        H, W = data['H'], data['W']
+        H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
@@ -266,11 +271,13 @@ class Trainer(object):
 
         dir_text_z = None
         if "camera_type" in data:
-            dir_text_z = [self.text_embeds['uncond'], self.text_embeds[data['camera_type'][0]][data['dirkey'][0]]]
-            dir_text_z = torch.cat(dir_text_z)
+            bs = data["H"].shape[0]
+            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
+            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
+            dir_text_z = torch.cat([uncond, cond])
 
         with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
-            out = self.model(rays_o, rays_d, mvp, data['H'], data['W'], shading='albedo')
+            out = self.model(rays_o, rays_d, mvp, data['H'][0], data['W'][0], shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
         normal = out['normal'].permute(0, 3, 1, 2)
         alpha = out['alpha'].permute(0, 3, 1, 2)
@@ -279,11 +286,12 @@ class Trainer(object):
         # import sys
         # sys.exit()
 
-        with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
-            out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
-        image_annel = out_annel['image'].permute(0, 3, 1, 2)
-        normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
-        alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
+        # with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+        #     out_annel = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
+        # image_annel = out_annel['image'].permute(0, 3, 1, 2)
+        # normal_annel = out_annel['normal'].permute(0, 3, 1, 2)
+        # alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
+        image_annel = VF.resize(image, (H, W), VF.InterpolationMode.BICUBIC)
 
         pred = torch.cat([out['image'], out['normal']], dim=2)
         pred = (pred[0].detach().cpu().numpy() * 255).astype(np.uint8)

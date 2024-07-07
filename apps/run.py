@@ -48,11 +48,12 @@ if __name__ == '__main__':
             import threestudio.data.random_multiview as mv
             config = mv.parse_structured(mv.RandomMultiviewCameraDataModuleConfig, exp_cfg.data)
             dataset = mv.RandomMultiviewCameraIterableDataset(config)
-            return DataLoader(dataset, batch_size=4, num_workers=0, collate_fn=dataset.collate)
+            return DataLoader(dataset, batch_size=cfg.batch_size, num_workers=0, collate_fn=dataset.collate)
         else:
             size = 4 if phase == 'val' else 100
+            batch_size = cfg.batch_size if phase == 'train' else 1
             dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
-            return DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
+            return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     def configure_guidance():
         opt = cfg.guidance

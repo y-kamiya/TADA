@@ -1,5 +1,6 @@
-name: 'with_normal_supervision'
-fp16: False
+name: 'dev'
+fp16: True
+batch_size: 1
 stage: geo_tex
 test: False
 model:
@@ -7,7 +8,8 @@ model:
   lock_tex: False
   skip_bg: True
   init_empty_tex: True
-  albedo_res: 2048
+  init_with_tpose: True
+  albedo_res: 1024
   mesh: data/init_body/fit_smplx_dense.obj
 training:
   anneal_tex_reso: True
@@ -21,3 +23,4 @@ data:
   theta_range: [60, 90]
   head_phi_range: [-30, 30]
   head_theta_range: [75, 85]
+

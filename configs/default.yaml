@@ -2,6 +2,7 @@ name: 'default'
 seed: 0
 stage: "geo"
 fp16: False
+batch_size: 1
 text: ""
 negative: ""
 test: False
