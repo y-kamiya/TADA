@@ -6,6 +6,7 @@ test: False
 model:
   lock_geo: False
   lock_tex: False
+  v_offsets_only: True
   skip_bg: True
   init_empty_tex: True
   init_with_tpose: True

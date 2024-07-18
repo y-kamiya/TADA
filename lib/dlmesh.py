@@ -120,7 +120,7 @@ class DLMesh(nn.Module):
                 self.mlp_texture = MLPTexture3D()
             else:
                 res = self.opt.albedo_res
-                albedo = torch.ones((res, res, 3), dtype=torch.float32) * 0.5  # default color
+                albedo = torch.ones((res, res, 3), dtype=torch.float32, device=self.device) * 0.5  # default color
                 self.raw_albedo = nn.Parameter(trunc_rev_sigmoid(albedo))
 
         # Geometry parameters
@@ -130,7 +130,7 @@ class DLMesh(nn.Module):
                 self.encoder_geo, in_dim_geo = get_encoder('hashgrid', interpolation='smoothstep')
                 self.geo_net = MLP(in_dim_geo, 1, 32, 2)
             else:
-                self.v_offsets = nn.Parameter(torch.zeros(N, 1))
+                self.v_offsets = nn.Parameter(torch.zeros(N, 1).to(self.device))
 
             # shape
             if not self.lock_beta:
@@ -154,6 +154,8 @@ class DLMesh(nn.Module):
                                                output_facial_transformation_matrixes=True,
                                                num_faces=1)
         self.detector = vision.FaceLandmarker.create_from_options(options)
+
+        self.v_cano_dense, _ = self.get_v_cano_dense(use_cache=False)
 
     @torch.no_grad()
     def get_init_body(self, cache_path='./data/init_body/data.npz'):
@@ -274,50 +276,63 @@ class DLMesh(nn.Module):
             v_offsets[SMPLXSeg.hands_ids] = 0.
         return v_offsets
 
-    def get_mesh(self, is_train):
+    def get_v_cano_dense(self, use_cache=False):
+        if use_cache:
+            return self.v_cano_dense, None
+
+        output = self.body_model(
+            betas=self.betas,
+            body_pose=self.body_pose,
+            jaw_pose=self.jaw_pose,
+            # jaw_pose=random.choice(self.rich_params)[None, :3],
+            # jaw_pose=self.rich_params[500:501, :3],
+            expression=self.expression,
+            return_verts=True
+        )
+        v_cano = output.v_posed[0]
+
+        # re-mesh
+        v_cano_dense = subdivide_inorder(v_cano, self.smplx_faces[self.remesh_mask], self.uniques[0])
+
+        for unique, faces in zip(self.uniques[1:], self.faces_list[:-1]):
+            v_cano_dense = subdivide_inorder(v_cano_dense, faces, unique)
+
+        return v_cano_dense, output
+
+    def get_mesh(self, is_train, is_init=False):
         # os.makedirs("./results/pipline/obj/", exist_ok=True)
-        if not self.opt.lock_geo:
-            output = self.body_model(
-                betas=self.betas,
-                body_pose=self.body_pose,
-                jaw_pose=self.jaw_pose,
-                # jaw_pose=random.choice(self.rich_params)[None, :3],
-                # jaw_pose=self.rich_params[500:501, :3],
-                expression=self.expression,
-                return_verts=True
-            )
-            v_cano = output.v_posed[0]
-            landmarks = output.joints[0, -68:, :]
+        if self.opt.lock_geo:
+            mesh = Mesh(base=self.mesh)
+            mesh.set_albedo(self.raw_albedo)
+            return mesh, None
 
-            # re-mesh
-            v_cano_dense = subdivide_inorder(v_cano, self.smplx_faces[self.remesh_mask], self.uniques[0])
+        v_cano_dense, output = self.get_v_cano_dense(self.opt.v_offsets_only)
+        if self.opt.v_offsets_only:
+            v_cano_dense = v_cano_dense.detach()
 
-            for unique, faces in zip(self.uniques[1:], self.faces_list[:-1]):
-                v_cano_dense = subdivide_inorder(v_cano_dense, faces, unique)
+        # add offset before warp
+        if self.v_offsets.shape[1] ==1:
+            vn = compute_normal(v_cano_dense, self.faces_list[-1])[0]
+            v_cano_dense += self.get_vertex_offset(is_train) * vn
+        else:
+            v_cano_dense += self.get_vertex_offset(is_train)
 
-            # add offset before warp
-            if not self.opt.lock_geo:
-                if self.v_offsets.shape[1] ==1:
-                    vn = compute_normal(v_cano_dense, self.faces_list[-1])[0]
-                    v_cano_dense += self.get_vertex_offset(is_train) * vn
-                else:
-                    v_cano_dense += self.get_vertex_offset(is_train)
+        v_posed_dense = v_cano_dense
+        if not self.opt.v_offsets_only:
             # LBS
             v_posed_dense = warp_points(v_cano_dense, self.dense_lbs_weights,
                                         output.joints_transform[:, :55]).squeeze(0)
 
-            # if not is_train:
-            v_posed_dense, center, scale = normalize_vert(v_posed_dense, return_cs=True)
+        # if not is_train:
+        v_posed_dense, center, scale = normalize_vert(v_posed_dense, return_cs=True)
 
-            mesh = Mesh(v_posed_dense, self.faces_list[-1].int(), vt=self.vt, ft=self.ft)
-            mesh.auto_normal()
+        mesh = Mesh(v_posed_dense, self.faces_list[-1].int(), vt=self.vt, ft=self.ft)
+        mesh.auto_normal()
 
-            if not self.opt.lock_tex and not self.opt.tex_mlp:
-                mesh.set_albedo(self.raw_albedo)
-
-        else:
-            mesh = Mesh(base=self.mesh)
+        if not self.opt.lock_tex and not self.opt.tex_mlp:
             mesh.set_albedo(self.raw_albedo)
+
+        landmarks = None if output is None else output.joints[0, -68:, :]
         return mesh, landmarks
 
     @torch.no_grad()
@@ -386,16 +401,16 @@ class DLMesh(nn.Module):
         normal = normal * alpha + (1 - alpha) * bg_color
 
         # smplx landmarks
-        smplx_landmarks = F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0)
-        smplx_landmarks = torch.bmm(smplx_landmarks.unsqueeze(0).repeat(batch, 1, 1),
-                                    torch.transpose(mvp, 1, 2)).float()  # [B, N, 4]
-        smplx_landmarks = smplx_landmarks[..., :2] / smplx_landmarks[..., 2:3]
-        smplx_landmarks = smplx_landmarks * 0.5 + 0.5
+        # smplx_landmarks = F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0)
+        # smplx_landmarks = torch.bmm(smplx_landmarks.unsqueeze(0).repeat(batch, 1, 1),
+        #                             torch.transpose(mvp, 1, 2)).float()  # [B, N, 4]
+        # smplx_landmarks = smplx_landmarks[..., :2] / smplx_landmarks[..., 2:3]
+        # smplx_landmarks = smplx_landmarks * 0.5 + 0.5
 
         return {
             "image": rgb,
             "alpha": alpha,
             "normal": normal,
-            "smplx_landmarks": smplx_landmarks,
+            # "smplx_landmarks": smplx_landmarks,
             "bg_color": bg_color,
         }

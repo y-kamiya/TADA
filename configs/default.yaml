@@ -75,6 +75,7 @@ model:
   lock_beta: False
   lock_pose: True
   lock_expression: False
+  v_offsets_only: False
   albedo_res: 1024
   init_empty_tex: True
   init_with_tpose: False
