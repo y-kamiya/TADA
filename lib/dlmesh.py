@@ -378,24 +378,16 @@ class DLMesh(nn.Module):
             light_d = safe_normalize(light_d)
 
         # render
-        pr_mesh, smplx_landmarks = self.get_mesh(is_train=is_train)
+        pr_mesh, _ = self.get_mesh(is_train=is_train)
 
         rgb, normal, alpha = self.renderer(pr_mesh, mvp, h, w, light_d, ambient_ratio, shading, self.opt.ssaa,
                                            mlp_texture=self.mlp_texture, is_train=is_train)
         rgb = rgb * alpha + (1 - alpha) * bg_color
         normal = normal * alpha + (1 - alpha) * bg_color
 
-        # smplx landmarks
-        smplx_landmarks = F.pad(smplx_landmarks, pad=(0, 1), mode='constant', value=1.0)
-        smplx_landmarks = torch.bmm(smplx_landmarks.unsqueeze(0).repeat(batch, 1, 1),
-                                    torch.transpose(mvp, 1, 2)).float()  # [B, N, 4]
-        smplx_landmarks = smplx_landmarks[..., :2] / smplx_landmarks[..., 2:3]
-        smplx_landmarks = smplx_landmarks * 0.5 + 0.5
-
         return {
             "image": rgb,
             "alpha": alpha,
             "normal": normal,
-            "smplx_landmarks": smplx_landmarks,
             "bg_color": bg_color,
         }
