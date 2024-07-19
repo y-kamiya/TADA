@@ -1,4 +1,4 @@
-name: 'dev'
+name: 'micro'
 fp16: True
 batch_size: 4
 stage: geo_tex
@@ -8,21 +8,22 @@ model:
   lock_tex: False
   skip_bg: True
   init_empty_tex: True
-  init_with_tpose: True
   albedo_res: 1024
-  mesh: data/init_body/fit_smplx_dense.obj
 guidance:
   guidance_scale: 7.5
   denoise_steps: 50
-  t2_schedule: [0.8, 0.5]
+  t2_schedule: [0.8, 0.7]
 training:
   anneal_tex_reso: True
   train_face_ratio: 0.3
-  iters: 15000
+  iters: 3000
+  lr: 0.001
   ckpt: scratch
   workspace: "output"
   use_dpt: True
   strategy: 'micro'
+  micro_recon_iters: 15
+  save_image_interval: 100
 data:
   phi_range: [-180, 180]
   theta_range: [60, 90]
