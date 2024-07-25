@@ -234,8 +234,8 @@ class Trainer(object):
 
             def make_divisible(x, y): return x + (y - x % y)
 
-            H = max(make_divisible(int(H * scale), 16), 32)
-            W = max(make_divisible(int(W * scale), 16), 32)
+            H = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
+            W = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
 
         with (torch.no_grad(),
               torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32)):

@@ -27,6 +27,7 @@ training:
   min_lr: 1e-4
   ckpt: latest
   anneal_tex_reso: False
+  anneal_tex_reso_size: 32
   optim: 'adan'
   train_face_ratio: 0.3
   eval_interval: 10
