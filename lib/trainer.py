@@ -21,6 +21,7 @@ from uuid import uuid4
 from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
+from lib.isnet import ISNet
 
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
 from imagedream.camera_utils import convert_blender_to_opengl
@@ -84,6 +85,7 @@ class Trainer(object):
         self.console = Console()
 
         self.model = model.to(self.device)
+        self.isnet = ISNet(self.device) if opt.use_isnet else None
         # self.model = torch.nn.DataParallel(self.model, device_ids=[0, 1, 2, 3]).module
         if self.world_size > 1:
             self.model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.model)
@@ -220,6 +222,7 @@ class Trainer(object):
                 self.log_ptr.flush()  # write immediately to file
 
     def train_step_micro(self, data, is_full_body, loader, pbar):
+        assert self.dpt is not None and self.isnet is not None
         bs = data["H"].shape[0]
         H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
@@ -248,11 +251,12 @@ class Trainer(object):
 
         with torch.no_grad():
             refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters)
-            # dpt_normal_raw = self.dpt(refined_image)
-            # dpt_normal = 1 - dpt_normal_raw
+            mask = self.isnet(refined_image)
+            dpt_normal_raw = self.dpt(refined_image)
+            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
 
-        # output_dir = f"output/tmp.jpg"
         # pred = torch.cat([image, refined_image, dpt_normal, dpt_normal_raw], dim=3).permute(0, 2, 3, 1)
+        # self.save_images(pred, "output/tmp.jpg")
         # import sys
         # sys.exit()
 
@@ -270,17 +274,17 @@ class Trainer(object):
 
             # dpt_normal_raw = self.dpt(image)
             # dpt_normal = (1 - dpt_normal_raw) * alpha + (1 - alpha)
-            # loss_normal = 1 - F.cosine_similarity(normal, dpt_normal).mean()
+            loss_normal = 1 - F.cosine_similarity(normal, dpt_normal).mean()
 
-            # loss = loss_rgb + loss_normal
-            loss = loss_rgb
+            loss = loss_rgb + loss_normal
+            # loss = loss_rgb
             total_loss += loss.item()
 
             self.train_step_post(out, loss, loader, pbar)
 
-        # output_dir = f"{self.workspace}/render"
-        # pred = torch.cat([image, refined_image, dpt_normal, dpt_normal_raw], dim=3).permute(0, 2, 3, 1)
-        # self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
+        output_dir = f"{self.workspace}/render"
+        pred = torch.cat([image, refined_image, dpt_normal, dpt_normal_raw], dim=3).permute(0, 2, 3, 1)
+        self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
 
         return out, total_loss
 

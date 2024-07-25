@@ -42,6 +42,7 @@ training:
   lambda_normal: 1000
   lambda_depth: 10
   use_dpt: False
+  use_isnet: False
   strategy: 'sds'
   micro_recon_iters: 1
 data:
