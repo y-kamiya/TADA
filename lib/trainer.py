@@ -531,7 +531,7 @@ class Trainer(object):
                     all_preds.append(pred)
                 else:
                     os.makedirs(os.path.join(save_path, "image"), exist_ok=True)
-                    cv2.imwrite(os.path.join(save_path, "image", f'{i:04d}.png'),
+                    cv2.imwrite(os.path.join(save_path, "image", f'{i:04d}.jpg'),
                                 cv2.cvtColor(pred[..., :3], cv2.COLOR_RGB2BGRA))
 
                 pbar.update(loader.batch_size)
@@ -615,7 +615,7 @@ class Trainer(object):
 
         if self.global_step % self.opt.save_image_interval == 0:
             pred = torch.cat([render_out['image'], render_out['normal']], dim=2)
-            save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.png')
+            save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.jpg')
             self.save_images(pred, save_path)
 
         if hasattr(loader.dataset, "update_step"):
@@ -698,7 +698,7 @@ class Trainer(object):
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f})")
                     pbar.update(loader.batch_size)
 
-        save_path = os.path.join(self.workspace, 'validation', f'{name}.png')
+        save_path = os.path.join(self.workspace, 'validation', f'{name}.jpg')
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         cv2.imwrite(save_path, np.hstack(vis_frames))
 
