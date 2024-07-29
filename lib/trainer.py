@@ -256,7 +256,7 @@ class Trainer(object):
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
-            refined_image = VF.resize(refined_image, (H_anneal, H_anneal), VF.InterpolationMode.BICUBIC)
+            refined_image = VF.resize(refined_image, (H_anneal, H_anneal))
 
         # normal = out['normal'].permute(0, 3, 1, 2)
         # alpha = out['alpha'].permute(0, 3, 1, 2)
@@ -272,11 +272,11 @@ class Trainer(object):
             with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
                 out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
             image = out['image'].permute(0, 3, 1, 2)
+            image = VF.resize(image, (H_anneal, H_anneal))
             normal = out['normal'].permute(0, 3, 1, 2)
             alpha = out['alpha'].permute(0, 3, 1, 2)
 
             loss_rgb = F.l1_loss(image, refined_image)
-            # loss_rgb = F.mse_loss(image, refined_image)
             with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
                 loss_lpips = self.lpips.forward(image, refined_image, normalize=True).mean()
 
@@ -295,6 +295,8 @@ class Trainer(object):
             self.train_step_post(out, loss, loader, pbar)
 
         output_dir = f"{self.workspace}/render"
+        image = VF.resize(image.detach(), (H, W))
+        refined_image = VF.resize(refined_image, (H, W))
         pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
         self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
 
