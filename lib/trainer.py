@@ -231,20 +231,19 @@ class Trainer(object):
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
 
+        H_anneal, W_anneal = H, W
         if self.opt.anneal_tex_reso:
             scale = min(1, self.global_step / (0.8 * self.opt.iters))
 
             def make_divisible(x, y): return x + (y - x % y)
 
-            H = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
-            W = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+            H_anneal = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
+            H_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
 
         with (torch.no_grad(),
               torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32)):
             out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
-        normal = out['normal'].permute(0, 3, 1, 2)
-        alpha = out['alpha'].permute(0, 3, 1, 2)
 
         dir_text_z = None
         if "camera_type" in data:
@@ -257,7 +256,10 @@ class Trainer(object):
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            refined_image = VF.resize(refined_image, (H_anneal, H_anneal), VF.InterpolationMode.BICUBIC)
 
+        # normal = out['normal'].permute(0, 3, 1, 2)
+        # alpha = out['alpha'].permute(0, 3, 1, 2)
         # pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
         # self.save_images(pred, "output/tmp.jpg")
         # import sys
