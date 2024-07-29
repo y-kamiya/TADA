@@ -61,8 +61,8 @@ class Renderer(torch.nn.Module):
         depth = rast[..., [2]]  # [B, H, W]
 
         if is_train:
-            vn, _ = compute_normal(v_clip[0, :, :3], mesh.f)
-            normal, _ = dr.interpolate(vn[None, ...].float(), rast, mesh.f)
+            vn, _ = compute_normal(v_clip[:, :, :3], mesh.f)
+            normal, _ = dr.interpolate(vn, rast, mesh.f)
         else:
             normal, _ = dr.interpolate(mesh.vn[None, ...].float(), rast, mesh.f)
 

@@ -19,15 +19,16 @@ def compute_normal(vertices, faces):
 
     i0, i1, i2 = faces[:, 0].long(), faces[:, 1].long(), faces[:, 2].long()
 
-    v0, v1, v2 = vertices[i0, :], vertices[i1, :], vertices[i2, :]
+    v0, v1, v2 = vertices[:, i0, :], vertices[:, i1, :], vertices[:, i2, :]
 
     face_normals = torch.cross(v1 - v0, v2 - v0)
 
+    bs = vertices.shape[0]
     # Splat face normals to vertices
     vn = torch.zeros_like(vertices)
-    vn.scatter_add_(0, i0[:, None].repeat(1, 3), face_normals)
-    vn.scatter_add_(0, i1[:, None].repeat(1, 3), face_normals)
-    vn.scatter_add_(0, i2[:, None].repeat(1, 3), face_normals)
+    vn.scatter_add_(1, i0[None, :, None].repeat(bs, 1, 3), face_normals)
+    vn.scatter_add_(1, i1[None, :, None].repeat(bs, 1, 3), face_normals)
+    vn.scatter_add_(1, i2[None, :, None].repeat(bs, 1, 3), face_normals)
 
     # Normalize, replace zero (degenerated) normals with some default value
     vn = torch.where(dot(vn, vn) > 1e-20, vn, torch.tensor([0.0, 0.0, 1.0], dtype=torch.float32, device=vn.device))
@@ -196,7 +197,8 @@ class Mesh():
         self.v = self.v * scale
 
     def auto_normal(self):
-        self.vn, self.fn = compute_normal(self.v, self.f)
+        self.vn, self.fn = compute_normal(self.v.unsqueeze(0), self.f)
+        self.vn = self.vn[0]
         self.fn = self.f
 
     @torch.no_grad()

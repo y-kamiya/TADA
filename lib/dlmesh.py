@@ -298,8 +298,8 @@ class DLMesh(nn.Module):
             # add offset before warp
             if not self.opt.lock_geo:
                 if self.v_offsets.shape[1] ==1:
-                    vn = compute_normal(v_cano_dense, self.faces_list[-1])[0]
-                    v_cano_dense += self.get_vertex_offset(is_train) * vn
+                    vn = compute_normal(v_cano_dense.unsqueeze(0), self.faces_list[-1])[0]
+                    v_cano_dense += self.get_vertex_offset(is_train) * vn[0]
                 else:
                     v_cano_dense += self.get_vertex_offset(is_train)
             # LBS
