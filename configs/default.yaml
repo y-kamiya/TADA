@@ -38,10 +38,11 @@ training:
   sample_jaw_pose: False
   known_view_interval: 1
   known_view_noise_scale: 0.002
-  lambda_rgb: 1000
-  lambda_mask: 500
-  lambda_normal: 1000
-  lambda_depth: 10
+  lambda_lpips: 0.
+  lambda_rgb: 1000.
+  lambda_mask: 500.
+  lambda_normal: 1000.
+  lambda_depth: 10.
   use_dpt: False
   use_isnet: False
   strategy: 'sds'

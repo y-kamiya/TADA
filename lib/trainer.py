@@ -17,6 +17,7 @@ import torch.distributed as dist
 from rich.console import Console
 from torch_ema import ExponentialMovingAverage
 from uuid import uuid4
+from lpips import LPIPS
 
 from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
@@ -84,6 +85,7 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
+        self.lpips = LPIPS(net='vgg').to(self.device)
         self.model = model.to(self.device)
         self.isnet = ISNet(self.device) if opt.use_isnet else None
         # self.model = torch.nn.DataParallel(self.model, device_ids=[0, 1, 2, 3]).module
@@ -241,6 +243,7 @@ class Trainer(object):
               torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32)):
             out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
+        normal = out['normal'].permute(0, 3, 1, 2)
         alpha = out['alpha'].permute(0, 3, 1, 2)
 
         dir_text_z = None
@@ -255,7 +258,7 @@ class Trainer(object):
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
 
-        # pred = torch.cat([image, refined_image, dpt_normal, dpt_normal_raw], dim=3).permute(0, 2, 3, 1)
+        # pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
         # self.save_images(pred, "output/tmp.jpg")
         # import sys
         # sys.exit()
@@ -271,19 +274,26 @@ class Trainer(object):
             alpha = out['alpha'].permute(0, 3, 1, 2)
 
             loss_rgb = F.l1_loss(image, refined_image)
+            # loss_rgb = F.mse_loss(image, refined_image)
+            with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+                loss_lpips = self.lpips.forward(image, refined_image, normalize=True).mean()
 
             # dpt_normal_raw = self.dpt(image)
             # dpt_normal = (1 - dpt_normal_raw) * alpha + (1 - alpha)
-            loss_normal = 1 - F.cosine_similarity(normal, dpt_normal).mean()
+            loss_normal = (1 - F.cosine_similarity(normal, dpt_normal)).mean()
+            loss_mask = F.mse_loss(alpha, mask).mean()
 
-            loss = loss_rgb + loss_normal
-            # loss = loss_rgb
+            loss = self.opt.lambda_lpips * loss_lpips \
+                 + self.opt.lambda_rgb * loss_rgb \
+                 + self.opt.lambda_mask * loss_mask \
+                 + self.opt.lambda_normal * loss_normal
+
             total_loss += loss.item()
 
             self.train_step_post(out, loss, loader, pbar)
 
         output_dir = f"{self.workspace}/render"
-        pred = torch.cat([image, refined_image, dpt_normal, dpt_normal_raw], dim=3).permute(0, 2, 3, 1)
+        pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
         self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
 
         return out, total_loss
