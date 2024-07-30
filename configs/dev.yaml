@@ -1,6 +1,6 @@
 name: 'dev'
 fp16: True
-batch_size: 4
+batch_size: 1
 stage: geo_tex
 test: False
 model:
@@ -11,10 +11,6 @@ model:
   init_with_tpose: True
   albedo_res: 1024
   mesh: data/init_body/fit_smplx_dense.obj
-guidance:
-  guidance_scale: 7.5
-  denoise_steps: 50
-  t2_schedule: [0.8, 0.5]
 training:
   anneal_tex_reso: True
   train_face_ratio: 0.3
@@ -22,7 +18,6 @@ training:
   ckpt: scratch
   workspace: "output"
   use_dpt: True
-  strategy: 'micro'
 data:
   phi_range: [-180, 180]
   theta_range: [60, 90]

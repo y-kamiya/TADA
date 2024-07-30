@@ -126,9 +126,8 @@ class StableDiffusion(nn.Module):
 
     @torch.no_grad()
     def pred_noise(self, latents_noisy, t, text_embeddings, guidance_scale=None):
-        size = [1] * latents_noisy.dim()
-        size[0] = 2
-        latent_model_input = latents_noisy.repeat(size)
+        latent_model_input = latents_noisy.repeat((2, 1, 1, 1))
+        t = t.repeat(2) if t.dim() > 0 else t
         noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
 
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)

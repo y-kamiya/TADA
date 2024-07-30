@@ -23,6 +23,7 @@ training:
   workspace: "output"
   use_dpt: True
   use_isnet: True
+  use_lpips: True
   strategy: 'micro'
   micro_recon_iters: 15
   save_image_interval: 100

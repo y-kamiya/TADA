@@ -85,9 +85,9 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
-        self.lpips = LPIPS(net='vgg').to(self.device)
-        self.model = model.to(self.device)
         self.isnet = ISNet(self.device) if opt.use_isnet else None
+        self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
+        self.model = model.to(self.device)
         # self.model = torch.nn.DataParallel(self.model, device_ids=[0, 1, 2, 3]).module
         if self.world_size > 1:
             self.model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.model)
@@ -415,7 +415,7 @@ class Trainer(object):
                     lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
                     loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
 
-        return out, loss.item()
+        return out, loss
 
     def eval_step(self, data):
         H, W = data['H'].item(), data['W'].item()
@@ -574,13 +574,15 @@ class Trainer(object):
         self.local_step = 0
 
         for data in loader:
-            with torch.cuda.amp.autocast(enabled=self.fp16):
-                if self.opt.strategy == "micro":
+            if self.opt.strategy == "micro":
+                with torch.cuda.amp.autocast(enabled=self.fp16):
                     render_out, loss = self.train_step_micro(data, loader.dataset.full_body, loader, pbar)
-                else:
-                    self.train_step_pre()
+            else:
+                self.train_step_pre()
+                with torch.cuda.amp.autocast(enabled=self.fp16):
                     render_out, loss = self.train_step(data, loader.dataset.full_body)
-                    self.train_step_post(render_out, loss, loader, pbar)
+                self.train_step_post(render_out, loss, loader, pbar)
+                loss = loss.item()
 
             total_loss += loss
 
