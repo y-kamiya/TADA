@@ -17,10 +17,12 @@ import torch.distributed as dist
 from rich.console import Console
 from torch_ema import ExponentialMovingAverage
 from uuid import uuid4
+from lpips import LPIPS
 
 from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
+from lib.isnet import ISNet
 
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
 from imagedream.camera_utils import convert_blender_to_opengl
@@ -83,6 +85,8 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
+        self.isnet = ISNet(self.device) if opt.use_isnet else None
+        self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
         self.model = model.to(self.device)
         # self.model = torch.nn.DataParallel(self.model, device_ids=[0, 1, 2, 3]).module
         if self.world_size > 1:
@@ -219,6 +223,88 @@ class Trainer(object):
                 print(*args, file=self.log_ptr)
                 self.log_ptr.flush()  # write immediately to file
 
+    def train_step_sir(self, data, is_full_body, loader, pbar):
+        assert self.dpt is not None and self.isnet is not None
+        bs = data["H"].shape[0]
+        H, W = data['H'][0], data['W'][0]
+        mvp = data['mvp']  # [B, 4, 4]
+        rays_o = data['rays_o']  # [B, N, 3]
+        rays_d = data['rays_d']  # [B, N, 3]
+
+        H_anneal, W_anneal = H, W
+        if self.opt.anneal_tex_reso:
+            scale = min(1, self.global_step / (0.8 * self.opt.iters))
+
+            def make_divisible(x, y): return x + (y - x % y)
+
+            H_anneal = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
+            H_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+
+        with (torch.no_grad(),
+              torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32)):
+            out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
+        image = out['image'].permute(0, 3, 1, 2)
+
+        dir_text_z = None
+        if "camera_type" in data:
+            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
+            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
+            dir_text_z = torch.cat([uncond, cond])
+
+        with torch.no_grad():
+            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters)
+            mask = self.isnet(refined_image)
+            dpt_normal_raw = self.dpt(refined_image)
+            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            if self.opt.anneal_tex_reso:
+                refined_image = VF.resize(refined_image, (H_anneal, H_anneal))
+
+        # normal = out['normal'].permute(0, 3, 1, 2)
+        # alpha = out['alpha'].permute(0, 3, 1, 2)
+        # pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
+        # self.save_images(pred, "output/tmp.jpg")
+        # import sys
+        # sys.exit()
+
+        total_loss = 0
+        for k in range(self.opt.sir_recon_iters):
+            self.train_step_pre(bs)
+
+            with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+                out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
+            image = out['image'].permute(0, 3, 1, 2)
+            if self.opt.anneal_tex_reso:
+                image = VF.resize(image, (H_anneal, H_anneal))
+            normal = out['normal'].permute(0, 3, 1, 2)
+            alpha = out['alpha'].permute(0, 3, 1, 2)
+
+            loss_rgb = F.l1_loss(image, refined_image)
+            with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
+                loss_lpips = self.lpips.forward(image, refined_image, normalize=True).mean()
+
+            # dpt_normal_raw = self.dpt(image)
+            # dpt_normal = (1 - dpt_normal_raw) * alpha + (1 - alpha)
+            loss_normal = (1 - F.cosine_similarity(normal, dpt_normal)).mean()
+            loss_mask = F.mse_loss(alpha, mask).mean()
+
+            loss = self.opt.lambda_lpips * loss_lpips \
+                 + self.opt.lambda_rgb * loss_rgb \
+                 + self.opt.lambda_mask * loss_mask \
+                 + self.opt.lambda_normal * loss_normal
+
+            total_loss += loss.item()
+
+            self.train_step_post(out, loss, loader, pbar)
+
+        output_dir = f"{self.workspace}/render"
+        if self.opt.anneal_tex_reso:
+            image = VF.resize(image.detach(), (H, W))
+            refined_image = VF.resize(refined_image, (H, W))
+        pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
+        self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
+
+        return out, total_loss
+
     def train_step(self, data, is_full_body):
         mapping = {
             "height": "H",
@@ -293,9 +379,6 @@ class Trainer(object):
         # alpha_annel = out_annel['alpha'].permute(0, 3, 1, 2)
         image_annel = VF.resize(image, (H, W), VF.InterpolationMode.BICUBIC)
 
-        pred = torch.cat([out['image'], out['normal']], dim=2)
-        pred = (pred[0].detach().cpu().numpy() * 255).astype(np.uint8)
-
         p_iter = self.global_step / self.opt.iters
 
         if do_rgbd_loss:  # with image input
@@ -332,80 +415,7 @@ class Trainer(object):
                     lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
                     loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
 
-                    # pred = np.hstack([(normal[0]).permute(1, 2, 0).detach().cpu().numpy(),
-                    #                   dpt_normal[0].permute(1, 2, 0).detach().cpu().numpy()]) * 255
-                    # cv2.imwrite("im.png", pred)
-                    # exit()
-
-        if False:
-            rgb_np_ori = out['image'].squeeze(0).detach().cpu().numpy()
-            mediapipe_landmarks = self.model.get_mediapipe_landmarks(rgb_np_ori * 255)
-            if len(mediapipe_landmarks) > 0:
-                mp_mouth_idx = [0, 321, 291, 37, 39, 40, 267, 17, 146, 84, 181, 405,
-                                375, 185, 314, 91, 61, 269, 270, 409, 291]
-                mp_nose_idx = [168, 6, 197, 195, 5]
-                mp_contour_idx = [132, 136, 397, 400, 148, 149, 150, 152, 288, 172, 176, 58,
-                                  323, 454, 93, 356, 361, 234, 365, 377, 378, 379, 127]
-
-                mp_lmk_mouth = np.array([
-                    [landmark.x, landmark.y] for idx, landmark in enumerate(mediapipe_landmarks[0]) if
-                    idx in mp_mouth_idx
-                ])
-                mp_lmk_nose = np.array([
-                    [landmark.x, landmark.y] for idx, landmark in enumerate(mediapipe_landmarks[0]) if
-                    idx in mp_nose_idx
-                ])
-                mp_lmk_contour = np.array([
-                    [landmark.x, landmark.y] for idx, landmark in enumerate(mediapipe_landmarks[0]) if
-                    idx in mp_contour_idx
-                ])
-                mp_lmk_all = np.array(
-                    [[landmark.x, landmark.y] for idx, landmark in enumerate(mediapipe_landmarks[0])])
-
-                mp_lmk_mouth = torch.tensor(mp_lmk_mouth, device=image.device).float().view(1, -1, 2)
-                mp_lmk_nose = torch.tensor(mp_lmk_nose, device=image.device).float().view(1, -1, 2)
-                mp_lmk_contour = torch.tensor(mp_lmk_contour, device=image.device).float().view(1, -1, 2)
-
-                smplx_lmk_eye_brow, smplx_lmk_nose, _, smplx_lmk_eye, smplx_lmk_mouth, smplx_lmk_lips, \
-                    smplx_lmk_contour = torch.split(out['smplx_landmarks'], [10, 4, 5, 12, 12, 8, 17], dim=1)
-
-                #             # landmarks loss
-                #             lips_chamfer, _ = chamfer_distance(mp_lmk_mouth, smplx_lmk_mouth)
-                #             nose_chamfer, _ = chamfer_distance(mp_lmk_nose, smplx_lmk_nose)
-                #             contour_chamfer, _ = chamfer_distance(mp_lmk_contour, smplx_lmk_contour)
-                #             lmk_loss = lips_chamfer + nose_chamfer + contour_chamfer
-                #             # print(lmk_loss.item(), loss.item())
-                #             loss += lmk_loss * 1e4
-                #
-                # visualize
-                # nml_np = draw_landmarks(out['normal'][0].detach().cpu().numpy() * 255,
-                #                         torch.cat([smplx_lmk_mouth, smplx_lmk_nose, smplx_lmk_contour], 1)[0],
-                #                         fill=(0, 0, 255))
-                # rgb_np = draw_landmarks(rgb_np_ori*255, torch.tensor(mp_lmk_all).float().view(-1, 2), fill=(255, 0, 0))
-                nml_np_ori = out['normal'][0].detach().cpu().numpy().copy() * 255
-                nml_np = draw_landmarks(nml_np_ori, smplx_lmk_eye[0], fill=(255, 255, 255))
-                nml_np = draw_landmarks(nml_np, smplx_lmk_nose[0], fill=(255, 255, 255))
-                nml_np = draw_landmarks(nml_np, torch.cat([smplx_lmk_mouth, smplx_lmk_lips], 1)[0],
-                                        fill=(255, 255, 255))
-                nml_np = draw_landmarks(nml_np, smplx_lmk_eye_brow[0], fill=(255, 255, 255))
-
-                # rgb_np = draw_landmarks(rgb_np_ori * 255, smplx_lmk_eye[0], fill=(255, 255, 255))
-                # rgb_np = draw_landmarks(rgb_np, smplx_lmk_nose[0], fill=(255, 255, 255))
-                # rgb_np = draw_landmarks(rgb_np, torch.cat([smplx_lmk_mouth, smplx_lmk_lips], 1)[0], fill=(255, 255, 255))
-                # rgb_np = draw_landmarks(rgb_np, smplx_lmk_eye_brow[0], fill=(255, 255, 255))
-                # rgb_np = draw_landmarks(rgb_np * 255, out['smplx_landmarks'][0], fill=(0, 0, 255))
-
-                # nml_np = out['normal'][0].detach().cpu().numpy() * 255
-                rgb_np = draw_mediapipe_landmarks(rgb_np_ori * 255, mediapipe_landmarks)
-                nml_np_ori = out['normal'][0].detach().cpu().numpy().copy() * 255
-                # rgb_np = draw_landmarks(rgb_np, torch.cat([mp_lmk_mouth, mp_lmk_nose, mp_lmk_contour], 1)[0])
-                pred = np.hstack(
-                    [rgb_np[:, 80:-80], nml_np[:, 80:-80], rgb_np_ori[:, 80:256] * 255, nml_np_ori[:, 256:-80]])[50:]
-                cv2.imwrite("im.png", pred[..., ::-1])
-                exit()
-
-
-        return pred, loss
+        return out, loss
 
     def eval_step(self, data):
         H, W = data['H'].item(), data['W'].item()
@@ -528,7 +538,7 @@ class Trainer(object):
                     all_preds.append(pred)
                 else:
                     os.makedirs(os.path.join(save_path, "image"), exist_ok=True)
-                    cv2.imwrite(os.path.join(save_path, "image", f'{i:04d}.png'),
+                    cv2.imwrite(os.path.join(save_path, "image", f'{i:04d}.jpg'),
                                 cv2.cvtColor(pred[..., :3], cv2.COLOR_RGB2BGRA))
 
                 pbar.update(loader.batch_size)
@@ -564,49 +574,20 @@ class Trainer(object):
         self.local_step = 0
 
         for data in loader:
+            if self.opt.strategy == "sir":
+                with torch.cuda.amp.autocast(enabled=self.fp16):
+                    render_out, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
+            else:
+                self.train_step_pre()
+                with torch.cuda.amp.autocast(enabled=self.fp16):
+                    render_out, loss = self.train_step(data, loader.dataset.full_body)
+                self.train_step_post(render_out, loss, loader, pbar)
+                loss = loss.item()
 
-            self.local_step += 1
-            self.global_step += 1
+            total_loss += loss
 
-            self.optimizer.zero_grad()
-
-            with torch.cuda.amp.autocast(enabled=self.fp16):
-                pred_rgbs, loss = self.train_step(data, loader.dataset.full_body)
-
-            if self.global_step % 20 == 0:
-                pred = cv2.cvtColor(pred_rgbs, cv2.COLOR_RGB2BGR)
-                save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.png')
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                cv2.imwrite(save_path, pred)
-
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-
-            if hasattr(loader.dataset, "update_step"):
-                loader.dataset.update_step(self.epoch, self.global_step)
-
-            if self.scheduler_update_every_step:
-                self.lr_scheduler.step()
-
-            loss_val = loss.item()
-            total_loss += loss_val
-
-            if self.local_rank == 0:
-                if self.use_tensorboardX:
-                    self.writer.add_scalar("train/loss", loss_val, self.global_step)
-                    self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
-
-                if self.scheduler_update_every_step:
-                    pbar.set_description(
-                        f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f}), "
-                        f"lr={self.optimizer.param_groups[0]['lr']:.6f}, ")
-                else:
-                    pbar.set_description(f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f})")
-                pbar.update(loader.batch_size)
-
-                if len(loader) <= self.local_step:
-                    break
+            if len(loader) <= self.local_step:
+                break
 
         if self.ema is not None:
             self.ema.update()
@@ -630,6 +611,49 @@ class Trainer(object):
                 self.lr_scheduler.step()
 
         self.log(f"==> Finished Epoch {self.epoch}.")
+
+    def train_step_pre(self, n_steps=1):
+        self.local_step += n_steps
+        self.global_step += n_steps
+        self.optimizer.zero_grad()
+
+    def train_step_post(self, render_out, loss, loader, pbar):
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+
+        if self.global_step % self.opt.save_image_interval == 0:
+            pred = torch.cat([render_out['image'], render_out['normal']], dim=2)
+            save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.jpg')
+            self.save_images(pred, save_path)
+
+        if hasattr(loader.dataset, "update_step"):
+            loader.dataset.update_step(self.epoch, self.global_step)
+
+        if self.scheduler_update_every_step:
+            self.lr_scheduler.step()
+
+        loss_val = loss.item()
+
+        if self.local_rank == 0:
+            if self.use_tensorboardX:
+                self.writer.add_scalar("train/loss", loss_val, self.global_step)
+                self.writer.add_scalar("train/lr", self.optimizer.param_groups[0]['lr'], self.global_step)
+
+            if self.scheduler_update_every_step:
+                pbar.set_description(
+                    f"loss={loss_val:.4f}, "
+                    f"lr={self.optimizer.param_groups[0]['lr']:.6f}, ")
+            else:
+                pbar.set_description(f"loss={loss_val:.4f}")
+            pbar.update(loader.batch_size)
+
+    def save_images(self, images, output_path):
+        imgs = torch.cat(images.split(1), dim=1)
+        imgs = (imgs[0].detach().cpu().numpy() * 255).astype(np.uint8)
+        imgs = cv2.cvtColor(imgs, cv2.COLOR_RGB2BGR)
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        cv2.imwrite(output_path, imgs)
 
     def evaluate_one_epoch(self, loader, name=None):
         self.log(f"++> Evaluate {self.workspace} at epoch {self.epoch} ...")
@@ -683,7 +707,7 @@ class Trainer(object):
                     pbar.set_description(f"loss={loss_val:.4f} ({total_loss / self.local_step:.4f})")
                     pbar.update(loader.batch_size)
 
-        save_path = os.path.join(self.workspace, 'validation', f'{name}.png')
+        save_path = os.path.join(self.workspace, 'validation', f'{name}.jpg')
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         cv2.imwrite(save_path, np.hstack(vis_frames))
 

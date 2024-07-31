@@ -17,6 +17,9 @@ guidance:
   ckpt: #None
   lora: #None
   embeddings: #None
+  guidance_scale: 100.
+  denoise_steps: 50
+  t2_schedule: [0.8, 0.5]
 training:
   iters: 5000
   albedo_iters: 10000
@@ -24,20 +27,27 @@ training:
   min_lr: 1e-4
   ckpt: latest
   anneal_tex_reso: False
+  anneal_tex_reso_size: 32
   optim: 'adan'
   train_face_ratio: 0.3
   eval_interval: 10
+  save_image_interval: 20
   workspace: "../data/tada"
   perpneg: False
   geo_loss: []
   sample_jaw_pose: False
   known_view_interval: 1
   known_view_noise_scale: 0.002
-  lambda_rgb: 1000
-  lambda_mask: 500
-  lambda_normal: 1000
-  lambda_depth: 10
+  lambda_lpips: 0.
+  lambda_rgb: 1000.
+  lambda_mask: 500.
+  lambda_normal: 1000.
+  lambda_depth: 10.
   use_dpt: False
+  use_isnet: False
+  use_lpips: False
+  strategy: 'sds'
+  sir_recon_iters: 1
 data:
   h: 512
   w: 512

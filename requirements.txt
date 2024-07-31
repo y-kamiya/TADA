@@ -23,4 +23,5 @@ iopath
 ninja
 mediapipe
 timm
+lpips
 git+https://github.com/NVlabs/nvdiffrast.git

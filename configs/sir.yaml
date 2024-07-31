@@ -1,0 +1,39 @@
+name: 'sir'
+fp16: True
+batch_size: 4
+stage: geo_tex
+test: False
+model:
+  lock_geo: False
+  lock_tex: False
+  skip_bg: True
+  init_empty_tex: True
+  albedo_res: 1024
+guidance:
+  guidance_scale: 7.5
+  denoise_steps: 50
+  t2_schedule: [0.8, 0.7]
+training:
+  anneal_tex_reso: True
+  anneal_tex_reso_size: 128
+  train_face_ratio: 0.3
+  iters: 3000
+  lr: 0.001
+  ckpt: scratch
+  workspace: "output"
+  use_dpt: True
+  use_isnet: True
+  use_lpips: True
+  strategy: 'sir'
+  sir_recon_iters: 15
+  save_image_interval: 100
+  lambda_lpips: 0.01
+  lambda_rgb: 0.04
+  lambda_mask: 0.04
+  lambda_normal: 0.4
+data:
+  phi_range: [-180, 180]
+  theta_range: [60, 90]
+  head_phi_range: [-30, 30]
+  head_theta_range: [75, 85]
+

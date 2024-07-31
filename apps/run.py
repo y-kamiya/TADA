@@ -50,7 +50,13 @@ if __name__ == '__main__':
             dataset = mv.RandomMultiviewCameraIterableDataset(config)
             return DataLoader(dataset, batch_size=cfg.batch_size, num_workers=0, collate_fn=dataset.collate)
         else:
-            size = 4 if phase == 'val' else 100
+            size = 100
+            if cfg.training.strategy == "sir":
+                size = cfg.batch_size
+            if phase == "val":
+                size = 4
+            if phase == "test":
+                size = 100
             batch_size = cfg.batch_size if phase == 'train' else 1
             dataset = ViewDataset(cfg.data, device=device, type=phase, size=size)
             return DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -134,7 +140,7 @@ if __name__ == '__main__':
             trainer.default_view_data = train_loader.dataset.get_default_view_data()
 
         valid_loader = build_dataloader('val')
-        max_epoch = np.ceil(cfg.training.iters / (len(train_loader) * train_loader.batch_size)).astype(np.int32)
+        max_epoch = np.ceil(cfg.training.iters / (len(train_loader) * train_loader.batch_size * cfg.training.sir_recon_iters)).astype(np.int32)
         trainer.train(train_loader, valid_loader, max_epoch)
 
         # test
