@@ -294,16 +294,16 @@ class Trainer(object):
 
             total_loss += loss.item()
 
-            self.train_step_post(out, loss, loader, pbar)
+            pred = None
+            if self.global_step % self.opt.save_image_interval == 0:
+                if self.opt.anneal_tex_reso:
+                    img = VF.resize(image.detach(), (H, W))
+                    refined_img = VF.resize(refined_image, (H, W))
+                pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
 
-        output_dir = f"{self.workspace}/render"
-        if self.opt.anneal_tex_reso:
-            image = VF.resize(image.detach(), (H, W))
-            refined_image = VF.resize(refined_image, (H, W))
-        pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
-        self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
+            self.train_step_post(pred, loss, loader, pbar)
 
-        return out, total_loss
+        return pred, total_loss
 
     def train_step(self, data, is_full_body):
         mapping = {
@@ -415,7 +415,11 @@ class Trainer(object):
                     lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
                     loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
 
-        return out, loss
+        pred = None
+        if self.global_step % self.opt.save_image_interval == 0:
+            pred = torch.cat([out['image'], out['normal']], dim=2)
+
+        return pred, loss
 
     def eval_step(self, data):
         H, W = data['H'].item(), data['W'].item()
@@ -576,12 +580,13 @@ class Trainer(object):
         for data in loader:
             if self.opt.strategy == "sir":
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    render_out, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
+                    _, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
             else:
                 self.train_step_pre(loader.batch_size)
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    render_out, loss = self.train_step(data, loader.dataset.full_body)
-                self.train_step_post(render_out, loss, loader, pbar)
+                    pred, loss = self.train_step(data, loader.dataset.full_body)
+
+                self.train_step_post(pred, loss, loader, pbar)
                 loss = loss.item()
 
             total_loss += loss
@@ -617,13 +622,12 @@ class Trainer(object):
         self.global_step += n_steps
         self.optimizer.zero_grad()
 
-    def train_step_post(self, render_out, loss, loader, pbar):
+    def train_step_post(self, pred, loss, loader, pbar):
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
 
-        if self.global_step % self.opt.save_image_interval == 0:
-            pred = torch.cat([render_out['image'], render_out['normal']], dim=2)
+        if pred is not None:
             save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.jpg')
             self.save_images(pred, save_path)
 
