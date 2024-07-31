@@ -1,4 +1,4 @@
-name: 'micro'
+name: 'sir'
 fp16: True
 batch_size: 4
 stage: geo_tex
@@ -24,8 +24,8 @@ training:
   use_dpt: True
   use_isnet: True
   use_lpips: True
-  strategy: 'micro'
-  micro_recon_iters: 15
+  strategy: 'sir'
+  sir_recon_iters: 15
   save_image_interval: 100
   lambda_lpips: 0.01
   lambda_rgb: 0.04

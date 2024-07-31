@@ -223,7 +223,7 @@ class Trainer(object):
                 print(*args, file=self.log_ptr)
                 self.log_ptr.flush()  # write immediately to file
 
-    def train_step_micro(self, data, is_full_body, loader, pbar):
+    def train_step_sir(self, data, is_full_body, loader, pbar):
         assert self.dpt is not None and self.isnet is not None
         bs = data["H"].shape[0]
         H, W = data['H'][0], data['W'][0]
@@ -267,7 +267,7 @@ class Trainer(object):
         # sys.exit()
 
         total_loss = 0
-        for k in range(self.opt.micro_recon_iters):
+        for k in range(self.opt.sir_recon_iters):
             self.train_step_pre(bs)
 
             with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
@@ -574,9 +574,9 @@ class Trainer(object):
         self.local_step = 0
 
         for data in loader:
-            if self.opt.strategy == "micro":
+            if self.opt.strategy == "sir":
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    render_out, loss = self.train_step_micro(data, loader.dataset.full_body, loader, pbar)
+                    render_out, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
             else:
                 self.train_step_pre()
                 with torch.cuda.amp.autocast(enabled=self.fp16):
