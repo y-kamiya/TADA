@@ -25,6 +25,7 @@ from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 from lib.isnet import ISNet
 from lib.sr import RealESRGAN
+from lib.loss import Smoother
 
 import threestudio.utils.config as three_cfg
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
@@ -88,6 +89,7 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
+        self.smoother = Smoother(self.device)
         self.realesrgan = RealESRGAN(self.device, opt.sr) if opt.sr > 1 else None
         self.isnet = ISNet(self.device) if opt.use_isnet else None
         self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
@@ -315,11 +317,13 @@ class Trainer(object):
             # dpt_normal = (1 - dpt_normal_raw) * alpha + (1 - alpha)
             loss_normal = (1 - F.cosine_similarity(normal, dpt_normal)).mean()
             loss_mask = F.mse_loss(alpha, mask).mean()
+            loss_smooth = self.smoother(refined_image, normal, alpha.detach()).mean()
 
             loss = self.opt.lambda_lpips * loss_lpips \
                  + self.opt.lambda_rgb * loss_rgb \
                  + self.opt.lambda_mask * loss_mask \
-                 + self.opt.lambda_normal * loss_normal
+                 + self.opt.lambda_normal * loss_normal \
+                 + 0.013 * loss_smooth
             loss = loss * self.opt.lambda_all
             # print(loss_lpips, loss_rgb, loss_mask, loss_normal)
             del loss_rgb
@@ -333,8 +337,8 @@ class Trainer(object):
             if self.global_step % self.opt.save_image_interval == 0:
                 img, refined_img = image.detach(), refined_image
                 if self.opt.anneal_tex_reso:
-                    img = VF.resize(image.detach(), (H, W))
-                    refined_img = VF.resize(refined_image, (H, W))
+                    img = VF.resize(img, (H, W))
+                    refined_img = VF.resize(refined_img, (H, W))
                 pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
 
             self.train_step_post(pred, loss, loader, pbar)
