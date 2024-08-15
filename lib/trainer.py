@@ -314,7 +314,7 @@ class Trainer(object):
             if k in data:
                 data[v] = data[k]
                 if not isinstance(data[k], torch.Tensor):
-                    data[v] = torch.tensor(data[k])
+                    data[v] = torch.tensor([data[k]])
                 data[v] = data[v].to(self.device)
 
         if "c2w" in data:
@@ -578,7 +578,7 @@ class Trainer(object):
                 with torch.cuda.amp.autocast(enabled=self.fp16):
                     render_out, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
             else:
-                self.train_step_pre()
+                self.train_step_pre(loader.batch_size)
                 with torch.cuda.amp.autocast(enabled=self.fp16):
                     render_out, loss = self.train_step(data, loader.dataset.full_body)
                 self.train_step_post(render_out, loss, loader, pbar)
@@ -586,7 +586,7 @@ class Trainer(object):
 
             total_loss += loss
 
-            if len(loader) <= self.local_step:
+            if len(loader) * loader.batch_size <= self.local_step:
                 break
 
         if self.ema is not None:

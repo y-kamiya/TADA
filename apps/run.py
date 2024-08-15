@@ -28,14 +28,15 @@ if __name__ == '__main__':
     ])
     # cfg.model.merge_from_list(['mesh', args.mesh])
     # cfg.training.merge_from_list(['workspace', args.workspace])
-    cfg.freeze()
 
     seed_everything(cfg.seed)
 
     if cfg.guidance.name == 'imagedream':
         exp_cfg: three_cfg.ExperimentConfig
         exp_cfg = three_cfg.load_config("ImageDream/configs/imagedream-sd21-shading.yaml")
+        cfg.batch_size = exp_cfg.data.batch_size
 
+    cfg.freeze()
 
     def build_dataloader(phase):
         """
