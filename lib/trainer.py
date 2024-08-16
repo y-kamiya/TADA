@@ -318,13 +318,7 @@ class Trainer(object):
                 data[v] = data[v].to(self.device)
 
         if "c2w" in data:
-            rot = torch.tensor([
-                [0, 1, 0, 0],
-                [-1, 0, 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
-            ]).float().repeat(4, 1, 1)
-            c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
+            c2w = convert_blender_to_opengl(data["c2w"])
             data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
 
         do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
