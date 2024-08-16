@@ -20,6 +20,7 @@ guidance:
   guidance_scale: 100.
   denoise_steps: 50
   t2_schedule: [0.8, 0.5]
+  t1_ratio: 0.6
 training:
   iters: 5000
   albedo_iters: 10000

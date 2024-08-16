@@ -252,19 +252,14 @@ class Trainer(object):
             dir_text_z = torch.cat([uncond, cond])
 
         with torch.no_grad():
-            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters)
+            data["is_full_body"] = is_full_body
+            data["comp_rgb_bg"] = out["bg_color"]
+            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, **data)
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
             if self.opt.anneal_tex_reso:
                 refined_image = VF.resize(refined_image, (H_anneal, H_anneal))
-
-        # normal = out['normal'].permute(0, 3, 1, 2)
-        # alpha = out['alpha'].permute(0, 3, 1, 2)
-        # pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
-        # self.save_images(pred, "output/tmp.jpg")
-        # import sys
-        # sys.exit()
 
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):
@@ -306,27 +301,6 @@ class Trainer(object):
         return pred, total_loss
 
     def train_step(self, data, is_full_body):
-        mapping = {
-            "height": "H",
-            "width": "W",
-        }
-        for k, v in mapping.items():
-            if k in data:
-                data[v] = data[k]
-                if not isinstance(data[k], torch.Tensor):
-                    data[v] = torch.tensor([data[k]])
-                data[v] = data[v].to(self.device)
-
-        if "c2w" in data:
-            rot = torch.tensor([
-                [0, 1, 0, 0],
-                [-1, 0, 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
-            ]).float().repeat(4, 1, 1)
-            c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
-            data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
-
         do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
 
         if do_rgbd_loss:
@@ -578,6 +552,27 @@ class Trainer(object):
         self.local_step = 0
 
         for data in loader:
+            mapping = {
+                "height": "H",
+                "width": "W",
+            }
+            for k, v in mapping.items():
+                if k in data:
+                    data[v] = data[k]
+                    if not isinstance(data[k], torch.Tensor):
+                        data[v] = torch.tensor([data[k]])
+                    data[v] = data[v].to(self.device)
+
+            if "c2w" in data:
+                rot = torch.tensor([
+                    [0, 1, 0, 0],
+                    [-1, 0, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1],
+                ]).float().repeat(4, 1, 1)
+                c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
+                data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
+
             if self.opt.strategy == "sir":
                 with torch.cuda.amp.autocast(enabled=self.fp16):
                     _, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
