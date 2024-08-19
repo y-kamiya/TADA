@@ -4,6 +4,9 @@ batch_size: # fromimmagedream config
 test: False
 guidance:
   name: imagedream
+  guidance_scale: 3.0
+  denoise_steps: 10
+  t2_schedule: [0.8, 0.6]
 model:
   lock_geo: False
   lock_tex: False
@@ -15,10 +18,19 @@ model:
 training:
   anneal_tex_reso: True
   train_face_ratio: 0.0
-  iters: 15000
+  iters: 3000
   ckpt: scratch
   workspace: "output"
   use_dpt: True
+  use_isnet: True
+  use_lpips: True
+  strategy: 'sir'
+  sir_recon_iters: 15
+  save_image_interval: 100
+  lambda_lpips: 0.01
+  lambda_rgb: 0.04
+  lambda_mask: 0.04
+  lambda_normal: 0.4
 data:
   phi_range: [-180, 180] # dummy
   theta_range: [85, 90] # dummy

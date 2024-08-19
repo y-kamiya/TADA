@@ -138,7 +138,7 @@ class StableDiffusion(nn.Module):
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel):
+    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, **kargs):
         pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
         latents = self.encode_imgs(pred_rgb_scaled)
 
