@@ -4,6 +4,7 @@ from diffusers import DDIMScheduler, DDIMInverseScheduler
 
 from threestudio.models.guidance.multiview_diffusion_guidance import MultiviewDiffusionGuidance
 from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
+from imagedream.ldm.util import add_random_background
 
 
 class MultiviewDiffusion(MultiviewDiffusionGuidance):
@@ -33,23 +34,36 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         )
         return output["loss_sds"]
 
-    def build_context(self, text_embeddings, camera, fovy):
-        camera = self.get_camera_cond(camera, fovy)
+    def build_context(self, text_embeddings, **kwargs):
+        camera = self.get_camera_cond(kwargs["c2w"], kwargs["fovy"])
         camera = camera.repeat(2, 1).to(text_embeddings)
-        num_frames = 5
+
+        ip_img = self.prompt_image(self.prompt_utils, kwargs["is_full_body"])
+        bg_color = kwargs["comp_rgb_bg"].mean().detach().cpu().numpy() * 255
+        ip_img = add_random_background(ip_img, bg_color)
+        image_embeddings = self.model.get_learned_image_conditioning(ip_img)
+        un_image_embeddings = torch.zeros_like(image_embeddings).to(image_embeddings)
+
+        bs = text_embeddings.shape[0] // 2
+        ip = torch.cat([
+            image_embeddings.repeat(bs, 1, 1),
+            un_image_embeddings.repeat(bs, 1, 1)
+        ], dim=0).to(text_embeddings)
+
         return {
             "context": text_embeddings,
             "camera": camera,
-            "num_frames": num_frames, # number of frames
-        }
+            "num_frames": 5,
+            "ip": ip,
+        }, ip_img
 
     @torch.no_grad()
-    def pred_noise(self, latents_noisy, t, context, guidance_scale=None):
+    def pred_noise(self, latents_noisy, t, context, ip, guidance_scale=None):
         latent_model_input = latents_noisy.repeat((2, 1, 1, 1))
-        t = t.repeat(2) if t.dim() > 0 else t
+        t_expand = torch.tensor(t, device=latents_noisy.device).repeat(latent_model_input.shape[0])
 
-        latent_model_input, t, context = self.append_extra_view(latent_model_input, t, context, ip=ip)
-        noise_pred = self.model.apply_model(latent_model_input, t, context)
+        latent_model_input, t_expand, context = self.append_extra_view(latent_model_input, t_expand, context, ip=ip)
+        noise_pred = self.model.apply_model(latent_model_input, t_expand, context)
 
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
 
@@ -59,14 +73,14 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, **kargs):
-        assert kargs["c2w"] is not None and kargs["fovy"] is not None
+    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, **kwargs):
+        assert kwargs["c2w"] is not None and kwargs["fovy"] is not None
 
         pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
         latents = self.encode_images(pred_rgb_scaled)
 
         # t2_schedule_current = self.opt.t2_schedule[0] - t_annel * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
-        t2_schedule_current = kargs["t"]
+        t2_schedule_current = kwargs["t"]
         t1_index = torch.tensor(t2_schedule_current * self.opt.denoise_steps * 0.6, dtype=torch.long, device=self.device)
         t1 = self.inverse_scheduler.timesteps[t1_index]
         t2 = t2_schedule_current * self.num_train_timesteps
@@ -74,7 +88,10 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         noise = torch.randn_like(latents)
         latents_noisy = self.scheduler.add_noise(latents, noise, t1)
 
-        context = self.build_context(text_embeddings, kargs["c2w"], kargs["fovy"])
+        text_embeddings = self.prompt_utils.get_text_embeddings(
+            kwargs["elevation"], kwargs["azimuth"], kwargs["camera_distances"], False
+        )
+        context, ip_img = self.build_context(text_embeddings, **kwargs)
 
         for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
             t_prev = self.inverse_scheduler.timesteps[i+1]
@@ -82,14 +99,14 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
                 continue
             if t2 < t_prev:
                 break
-            noise_pred = self.pred_noise(latents_noisy, t, context, guidance_scale=0)
-            latents_noisy = self.inverse_scheduler.step(noise_pred, t_prev, latents_noisy).prev_sample
+            noise_pred = self.pred_noise(latents_noisy, t, context.copy(), ip_img, guidance_scale=0)
+            latents_noisy = self.inverse_scheduler.step(noise_pred[:-1], t_prev, latents_noisy).prev_sample
 
         for t in self.scheduler.timesteps:
             if t2 < t:
                 continue
-            noise_pred = self.pred_noise(latents_noisy, t, context)
-            latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=1.0).prev_sample.to(latents.dtype)
+            noise_pred = self.pred_noise(latents_noisy, t, context.copy(), ip_img)
+            latents_noisy = self.scheduler.step(noise_pred[:-1], t, latents_noisy, eta=0.0).prev_sample.to(latents.dtype)
 
         x0 = self.model.decode_first_stage(latents_noisy)
 

@@ -254,6 +254,8 @@ class Trainer(object):
         for t in [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
             with torch.no_grad():
                 data["t"] = t
+                data["is_full_body"] = is_full_body
+                data["comp_rgb_bg"] = out["bg_color"]
                 refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, **data)
                 mask = self.isnet(refined_image)
                 dpt_normal_raw = self.dpt(refined_image)
@@ -263,7 +265,9 @@ class Trainer(object):
 
             normal = out['normal'].permute(0, 3, 1, 2)
             alpha = out['alpha'].permute(0, 3, 1, 2)
-            pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
+            img = VF.resize(image.detach(), (H, W))
+            refined_img = VF.resize(refined_image, (H, W))
+            pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
             self.save_images(pred, f"output/refined_sample_t2-{t}.jpg")
         import sys
         sys.exit()
