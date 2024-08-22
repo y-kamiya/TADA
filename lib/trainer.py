@@ -544,7 +544,7 @@ class Trainer(object):
             loader.sampler.set_epoch(self.epoch)
 
         if self.local_rank == 0:
-            pbar = tqdm.tqdm(total=len(loader) * loader.batch_size,
+            pbar = tqdm.tqdm(total=self.opt.iters_per_epoch,
                              bar_format='{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
         self.local_step = 0
@@ -584,7 +584,7 @@ class Trainer(object):
 
             total_loss += loss
 
-            if len(loader) * loader.batch_size <= self.local_step:
+            if self.opt.iters_per_epoch <= self.local_step:
                 break
 
         if self.ema is not None:

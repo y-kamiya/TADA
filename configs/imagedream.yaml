@@ -21,14 +21,16 @@ training:
   train_face_ratio: 0.0
   train_face_scale: 1.4
   iters: 3000
+  iters_per_epoch: 300
+  sir_recon_iters: 75
+  eval_interval: 1
+  save_image_interval: 100
   ckpt: scratch
   workspace: "output"
   use_dpt: True
   use_isnet: True
   use_lpips: True
   strategy: 'sir'
-  sir_recon_iters: 15
-  save_image_interval: 100
   lambda_lpips: 0.01
   lambda_rgb: 0.04
   lambda_mask: 0.04
