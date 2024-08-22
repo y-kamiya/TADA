@@ -19,6 +19,7 @@ model:
 training:
   anneal_tex_reso: True
   train_face_ratio: 0.0
+  train_face_scale: 1.4
   iters: 3000
   ckpt: scratch
   workspace: "output"

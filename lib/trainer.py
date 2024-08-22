@@ -449,13 +449,11 @@ class Trainer(object):
                     train_loader.dataset.full_body = False
                     face_center, face_scale = self.model.get_mesh_center_scale("face")
 
-                    scale = 10
                     if isinstance(train_loader.dataset, RandomMultiviewCameraIterableDataset):
                         face_center = torch.tensor([face_center[0], -face_center[2], face_center[1]])
-                        scale = 1
 
                     train_loader.dataset.face_center = face_center
-                    train_loader.dataset.face_scale = face_scale.item() * scale
+                    train_loader.dataset.face_scale = face_scale.item() * self.opt.train_face_scale
 
                 else:
                     train_loader.dataset.full_body = True

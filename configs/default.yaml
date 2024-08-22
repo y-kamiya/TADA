@@ -31,6 +31,7 @@ training:
   anneal_tex_reso_size: 32
   optim: 'adan'
   train_face_ratio: 0.3
+  train_face_scale: 10.0
   eval_interval: 10
   save_image_interval: 20
   workspace: "../data/tada"
