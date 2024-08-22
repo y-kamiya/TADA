@@ -126,7 +126,7 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
             if t2 < t:
                 continue
             noise_pred = self.pred_noise(latents_noisy, t, context, ip_img)
-            latents_noisy = self.scheduler.step(noise_pred[:-1], t, latents_noisy, eta=0.0).prev_sample.to(latents.dtype)
+            latents_noisy = self.scheduler.step(noise_pred[:-1], t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
 
         x0 = self.decode_latents(latents_noisy)
 
