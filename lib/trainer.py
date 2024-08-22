@@ -575,7 +575,13 @@ class Trainer(object):
                     data[v] = data[v].to(self.device)
 
             if "c2w" in data:
-                c2w = convert_blender_to_opengl(data["c2w"])
+                rot = torch.tensor([
+                    [0, 1, 0, 0],
+                    [-1, 0, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1],
+                ]).float().repeat(4, 1, 1)
+                c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
                 data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
 
             if self.opt.strategy == "sir":
