@@ -225,7 +225,7 @@ class Trainer(object):
 
     def train_step_sir(self, data, is_full_body, loader, pbar):
         assert self.dpt is not None and self.isnet is not None
-        bs = data["H"].shape[0]
+        bs = data["mvp"].shape[0]
         H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
         rays_o = data['rays_o']  # [B, N, 3]
@@ -238,7 +238,9 @@ class Trainer(object):
             def make_divisible(x, y): return x + (y - x % y)
 
             H_anneal = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
-            H_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+            W_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+
+        self.log(f"batch_size: {bs}, annel resolution: ({H_anneal}, {W_anneal})")
 
         with (torch.no_grad(),
               torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32)):
@@ -258,8 +260,12 @@ class Trainer(object):
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            # pred = torch.cat([image, refined_image], dim=3).permute(0, 2, 3, 1)
+            # self.save_images(pred, f"output/tmp_u.jpg")
+            # import sys
+            # sys.exit()
             if self.opt.anneal_tex_reso:
-                refined_image = VF.resize(refined_image, (H_anneal, H_anneal))
+                refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
 
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):
@@ -269,7 +275,7 @@ class Trainer(object):
                 out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
             image = out['image'].permute(0, 3, 1, 2)
             if self.opt.anneal_tex_reso:
-                image = VF.resize(image, (H_anneal, H_anneal))
+                image = VF.resize(image, (H_anneal, W_anneal))
             normal = out['normal'].permute(0, 3, 1, 2)
             alpha = out['alpha'].permute(0, 3, 1, 2)
 
