@@ -259,11 +259,8 @@ class Trainer(object):
             refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, **data)
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
-            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
-            # pred = torch.cat([image, refined_image], dim=3).permute(0, 2, 3, 1)
-            # self.save_images(pred, f"output/tmp_u.jpg")
-            # import sys
-            # sys.exit()
+            dpt_normal = dpt_normal_raw * mask + (1 - mask)
+            # dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
             if self.opt.anneal_tex_reso:
                 refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
 
