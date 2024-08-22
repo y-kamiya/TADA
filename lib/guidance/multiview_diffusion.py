@@ -7,16 +7,35 @@ from threestudio.models.prompt_processors.stable_diffusion_prompt_processor impo
 from imagedream.ldm.util import add_random_background
 
 
+scheduler_config = {
+    "_class_name": "DDIMScheduler",
+    "beta_end": 0.012,
+    "beta_schedule": "scaled_linear",
+    "beta_start": 0.00085,
+    "clip_sample": False,
+    "clip_sample_range": 1.0,
+    "dynamic_thresholding_ratio": 0.995,
+    "num_train_timesteps": 1000,
+    "prediction_type": "epsilon",
+    "rescale_betas_zero_snr": False,
+    "sample_max_value": 1.0,
+    "set_alpha_to_one": False,
+    "steps_offset": 1,
+    "thresholding": False,
+    "timestep_spacing": "leading",
+    "trained_betas": None
+}
+
+
 class MultiviewDiffusion(MultiviewDiffusionGuidance):
     def __init__(self, three_cfg, opt, prompt_utils):
         super().__init__(three_cfg)
         self.opt = opt
         self.prompt_utils = prompt_utils
         self.resolution = 256
-        m = self.model
-        self.scheduler = DDIMScheduler(beta_start=m.linear_start, beta_end=m.linear_end)
+        self.scheduler = DDIMScheduler.from_config(scheduler_config)
         self.scheduler.set_timesteps(opt.denoise_steps)
-        self.inverse_scheduler = DDIMInverseScheduler(beta_start=m.linear_start, beta_end=m.linear_end)
+        self.inverse_scheduler = DDIMInverseScheduler.from_config(self.scheduler.config)
         self.inverse_scheduler.set_timesteps(opt.denoise_steps)
 
     def get_text_embeds(self, prompts):
@@ -62,10 +81,10 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         latent_model_input = latents_noisy.repeat((2, 1, 1, 1))
         t_expand = torch.tensor(t, device=latents_noisy.device).repeat(latent_model_input.shape[0])
 
-        latent_model_input, t_expand, context = self.append_extra_view(latent_model_input, t_expand, context, ip=ip)
+        latent_model_input, t_expand, context = self.append_extra_view(latent_model_input, t_expand, context.copy(), ip=ip)
         noise_pred = self.model.apply_model(latent_model_input, t_expand, context)
 
-        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
 
         if guidance_scale is None:
             guidance_scale = self.opt.guidance_scale
@@ -82,33 +101,39 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         # t2_schedule_current = self.opt.t2_schedule[0] - t_annel * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
         t2_schedule_current = kwargs["t"]
         t1_index = torch.tensor(t2_schedule_current * self.opt.denoise_steps * 0.6, dtype=torch.long, device=self.device)
-        t1 = self.inverse_scheduler.timesteps[t1_index]
+        t1 = self.inverse_scheduler.timesteps[-1]
+        # t1 = self.inverse_scheduler.timesteps[t1_index]
         t2 = t2_schedule_current * self.num_train_timesteps
 
         noise = torch.randn_like(latents)
-        latents_noisy = self.scheduler.add_noise(latents, noise, t1)
+        latents_noisy = torch.randn_like(latents)
+        # latents_noisy = self.scheduler.add_noise(latents, noise, t1)
 
         text_embeddings = self.prompt_utils.get_text_embeddings(
             kwargs["elevation"], kwargs["azimuth"], kwargs["camera_distances"], False
         )
         context, ip_img = self.build_context(text_embeddings, **kwargs)
 
-        for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
-            t_prev = self.inverse_scheduler.timesteps[i+1]
-            if t_prev <= t1:
-                continue
-            if t2 < t_prev:
-                break
-            noise_pred = self.pred_noise(latents_noisy, t, context.copy(), ip_img, guidance_scale=0)
-            latents_noisy = self.inverse_scheduler.step(noise_pred[:-1], t_prev, latents_noisy).prev_sample
+        # for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
+        #     t_prev = self.inverse_scheduler.timesteps[i+1]
+        #     if t_prev <= t1:
+        #         continue
+        #     if t2 < t_prev:
+        #         break
+        #     noise_pred = self.pred_noise(latents_noisy, t, context, ip_img, guidance_scale=0)
+        #     latents_noisy = self.inverse_scheduler.step(noise_pred[:-1], t_prev, latents_noisy).prev_sample
 
         for t in self.scheduler.timesteps:
             if t2 < t:
                 continue
-            noise_pred = self.pred_noise(latents_noisy, t, context.copy(), ip_img)
+            noise_pred = self.pred_noise(latents_noisy, t, context, ip_img)
             latents_noisy = self.scheduler.step(noise_pred[:-1], t, latents_noisy, eta=0.0).prev_sample.to(latents.dtype)
 
-        x0 = self.model.decode_first_stage(latents_noisy)
+        x0 = self.decode_latents(latents_noisy)
 
         return F.interpolate(x0, (pred_rgb.shape[-2], pred_rgb.shape[-1]), mode='bilinear', align_corners=False)
 
+    def decode_latents(self, latents):
+        imgs = self.model.decode_first_stage(latents)
+        imgs = ((imgs + 1) / 2).clamp(0, 1)
+        return imgs
