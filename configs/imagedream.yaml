@@ -7,12 +7,13 @@ guidance:
   guidance_scale: 5.0
   denoise_steps: 50
   t2_schedule: [0.8, 0.6]
+  t1_ratio: 1.0
 model:
   lock_geo: False
   lock_tex: False
   skip_bg: True
   init_empty_tex: True
-  albedo_res: 2048
+  albedo_res: 1024
   mesh: data/init_body/fit_smplx_dense.obj
   init_with_tpose: True
 training:

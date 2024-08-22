@@ -251,7 +251,8 @@ class Trainer(object):
             cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
             dir_text_z = torch.cat([uncond, cond])
 
-        for t in [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
+        for t in [1.0]:
+        # for t in [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]:
             with torch.no_grad():
                 data["t"] = t
                 data["is_full_body"] = is_full_body
@@ -463,7 +464,7 @@ class Trainer(object):
                     scale = 10
                     if isinstance(train_loader.dataset, RandomMultiviewCameraIterableDataset):
                         face_center = torch.tensor([face_center[0], -face_center[2], face_center[1]])
-                        scale = 1
+                        scale = 1.4
 
                     train_loader.dataset.face_center = face_center
                     train_loader.dataset.face_scale = face_scale.item() * scale
