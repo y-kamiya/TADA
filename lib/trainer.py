@@ -297,6 +297,10 @@ class Trainer(object):
                  + self.opt.lambda_mask * loss_mask \
                  + self.opt.lambda_normal * loss_normal
             # print(loss_lpips, loss_rgb, loss_mask, loss_normal)
+            del loss_rgb
+            del loss_lpips
+            del loss_normal
+            del loss_mask
 
             total_loss += loss.item()
 
@@ -309,6 +313,7 @@ class Trainer(object):
                 pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
 
             self.train_step_post(pred, loss, loader, pbar)
+            del loss
 
         return pred, total_loss
 
