@@ -169,6 +169,9 @@ class StableDiffusion(nn.Module):
 
         x0 = self.decode_latents(latents_noisy)
 
+        if sr_model is not None:
+            x0 = sr_model(x0)
+
         return F.interpolate(x0, (pred_rgb.shape[-2], pred_rgb.shape[-1]), mode='bicubic', align_corners=False)
 
     def train_step(self, text_embeddings, pred_rgb, guidance_scale=None, rgb_as_latents=False, data=None, bg_color=None, is_full_body=True):

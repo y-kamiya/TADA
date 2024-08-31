@@ -1,3 +1,4 @@
+import sys
 import glob
 import random
 import tqdm
@@ -23,6 +24,7 @@ from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 from lib.isnet import ISNet
+from lib.sr import RealESRGAN
 
 import threestudio.utils.config as three_cfg
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
@@ -86,6 +88,7 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
+        self.realesrgan = RealESRGAN(self.device, 2)
         self.isnet = ISNet(self.device) if opt.use_isnet else None
         self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
         self.model = model.to(self.device)
@@ -260,7 +263,7 @@ class Trainer(object):
         with torch.no_grad():
             data["is_full_body"] = is_full_body
             data["comp_rgb_bg"] = out["bg_color"]
-            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, **data)
+            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = dpt_normal_raw * mask + (1 - mask)
@@ -293,11 +296,13 @@ class Trainer(object):
                  + self.opt.lambda_rgb * loss_rgb \
                  + self.opt.lambda_mask * loss_mask \
                  + self.opt.lambda_normal * loss_normal
+            # print(loss_lpips, loss_rgb, loss_mask, loss_normal)
 
             total_loss += loss.item()
 
             pred = None
             if self.global_step % self.opt.save_image_interval == 0:
+                img, refined_img = image.detach(), refined_image
                 if self.opt.anneal_tex_reso:
                     img = VF.resize(image.detach(), (H, W))
                     refined_img = VF.resize(refined_image, (H, W))
@@ -654,7 +659,7 @@ class Trainer(object):
 
     def save_images(self, images, output_path):
         imgs = torch.cat(images.split(1), dim=1)
-        imgs = (imgs[0].detach().cpu().numpy() * 255).astype(np.uint8)
+        imgs = (imgs[0].detach().cpu().clamp_(0, 1).numpy() * 255).astype(np.uint8)
         imgs = cv2.cvtColor(imgs, cv2.COLOR_RGB2BGR)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         cv2.imwrite(output_path, imgs)
