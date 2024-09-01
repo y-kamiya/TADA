@@ -18,6 +18,9 @@ training:
   anneal_tex_reso_size: 128
   train_face_ratio: 0.3
   iters: 3000
+  iters_per_epoch: 60
+  sir_recon_iters: 15
+  save_image_interval: 100
   lr: 0.001
   ckpt: scratch
   workspace: "output"
@@ -25,8 +28,6 @@ training:
   use_isnet: True
   use_lpips: True
   strategy: 'sir'
-  sir_recon_iters: 15
-  save_image_interval: 100
   lambda_lpips: 0.01
   lambda_rgb: 0.04
   lambda_mask: 0.04

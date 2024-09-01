@@ -24,6 +24,7 @@ from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 from lib.isnet import ISNet
 
+import threestudio.utils.config as three_cfg
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
 from imagedream.camera_utils import convert_blender_to_opengl
 
@@ -181,10 +182,13 @@ class Trainer(object):
                 self.log(f"[INFO] Loading {self.use_checkpoint} ...")
                 self.load_checkpoint(self.use_checkpoint)
 
-    def save_config(self, cfg):
+    def save_config(self, cfg, exp_cfg):
         cfg_path = os.path.join(self.workspace, 'config.yaml')
         with open(cfg_path, "w") as f:
             print(cfg, file=f)
+
+        cfg_path = os.path.join(self.workspace, 'config_threestudio.yaml')
+        three_cfg.dump_config(cfg_path, exp_cfg)
     
     # calculate the text embeddings.
     def prepare_text_embeddings(self):
@@ -225,7 +229,7 @@ class Trainer(object):
 
     def train_step_sir(self, data, is_full_body, loader, pbar):
         assert self.dpt is not None and self.isnet is not None
-        bs = data["H"].shape[0]
+        bs = data["mvp"].shape[0]
         H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
         rays_o = data['rays_o']  # [B, N, 3]
@@ -238,7 +242,9 @@ class Trainer(object):
             def make_divisible(x, y): return x + (y - x % y)
 
             H_anneal = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
-            H_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+            W_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+
+        self.log(f"batch_size: {bs}, annel resolution: ({H_anneal}, {W_anneal})")
 
         with (torch.no_grad(),
               torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32)):
@@ -252,19 +258,15 @@ class Trainer(object):
             dir_text_z = torch.cat([uncond, cond])
 
         with torch.no_grad():
-            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters)
+            data["is_full_body"] = is_full_body
+            data["comp_rgb_bg"] = out["bg_color"]
+            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, **data)
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
-            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            dpt_normal = dpt_normal_raw * mask + (1 - mask)
+            # dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
             if self.opt.anneal_tex_reso:
-                refined_image = VF.resize(refined_image, (H_anneal, H_anneal))
-
-        # normal = out['normal'].permute(0, 3, 1, 2)
-        # alpha = out['alpha'].permute(0, 3, 1, 2)
-        # pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
-        # self.save_images(pred, "output/tmp.jpg")
-        # import sys
-        # sys.exit()
+                refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
 
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):
@@ -274,7 +276,7 @@ class Trainer(object):
                 out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
             image = out['image'].permute(0, 3, 1, 2)
             if self.opt.anneal_tex_reso:
-                image = VF.resize(image, (H_anneal, H_anneal))
+                image = VF.resize(image, (H_anneal, W_anneal))
             normal = out['normal'].permute(0, 3, 1, 2)
             alpha = out['alpha'].permute(0, 3, 1, 2)
 
@@ -294,39 +296,18 @@ class Trainer(object):
 
             total_loss += loss.item()
 
-            self.train_step_post(out, loss, loader, pbar)
+            pred = None
+            if self.global_step % self.opt.save_image_interval == 0:
+                if self.opt.anneal_tex_reso:
+                    img = VF.resize(image.detach(), (H, W))
+                    refined_img = VF.resize(refined_image, (H, W))
+                pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
 
-        output_dir = f"{self.workspace}/render"
-        if self.opt.anneal_tex_reso:
-            image = VF.resize(image.detach(), (H, W))
-            refined_image = VF.resize(refined_image, (H, W))
-        pred = torch.cat([image, refined_image, normal, dpt_normal, alpha.repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
-        self.save_images(pred, os.path.join(output_dir, f"{self.global_step}.jpg"))
+            self.train_step_post(pred, loss, loader, pbar)
 
-        return out, total_loss
+        return pred, total_loss
 
     def train_step(self, data, is_full_body):
-        mapping = {
-            "height": "H",
-            "width": "W",
-        }
-        for k, v in mapping.items():
-            if k in data:
-                data[v] = data[k]
-                if not isinstance(data[k], torch.Tensor):
-                    data[v] = torch.tensor(data[k])
-                data[v] = data[v].to(self.device)
-
-        if "c2w" in data:
-            rot = torch.tensor([
-                [0, 1, 0, 0],
-                [-1, 0, 0, 0],
-                [0, 0, 1, 0],
-                [0, 0, 0, 1],
-            ]).float().repeat(4, 1, 1)
-            c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
-            data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
-
         do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
 
         if do_rgbd_loss:
@@ -415,7 +396,11 @@ class Trainer(object):
                     lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
                     loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
 
-        return out, loss
+        pred = None
+        if self.global_step % self.opt.save_image_interval == 0:
+            pred = torch.cat([out['image'], out['normal']], dim=2)
+
+        return pred, loss
 
     def eval_step(self, data):
         H, W = data['H'].item(), data['W'].item()
@@ -471,13 +456,11 @@ class Trainer(object):
                     train_loader.dataset.full_body = False
                     face_center, face_scale = self.model.get_mesh_center_scale("face")
 
-                    scale = 10
                     if isinstance(train_loader.dataset, RandomMultiviewCameraIterableDataset):
                         face_center = torch.tensor([face_center[0], -face_center[2], face_center[1]])
-                        scale = 1
 
                     train_loader.dataset.face_center = face_center
-                    train_loader.dataset.face_scale = face_scale.item() * scale
+                    train_loader.dataset.face_scale = face_scale.item() * self.opt.train_face_scale
 
                 else:
                     train_loader.dataset.full_body = True
@@ -568,25 +551,47 @@ class Trainer(object):
             loader.sampler.set_epoch(self.epoch)
 
         if self.local_rank == 0:
-            pbar = tqdm.tqdm(total=len(loader) * loader.batch_size,
+            pbar = tqdm.tqdm(total=self.opt.iters_per_epoch,
                              bar_format='{desc}: {percentage:3.0f}% {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
 
         self.local_step = 0
 
         for data in loader:
+            mapping = {
+                "height": "H",
+                "width": "W",
+            }
+            for k, v in mapping.items():
+                if k in data:
+                    data[v] = data[k]
+                    if not isinstance(data[k], torch.Tensor):
+                        data[v] = torch.tensor([data[k]])
+                    data[v] = data[v].to(self.device)
+
+            if "c2w" in data:
+                rot = torch.tensor([
+                    [0, 1, 0, 0],
+                    [-1, 0, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1],
+                ]).float().repeat(4, 1, 1)
+                c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
+                data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
+
             if self.opt.strategy == "sir":
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    render_out, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
+                    _, loss = self.train_step_sir(data, loader.dataset.full_body, loader, pbar)
             else:
-                self.train_step_pre()
+                self.train_step_pre(loader.batch_size)
                 with torch.cuda.amp.autocast(enabled=self.fp16):
-                    render_out, loss = self.train_step(data, loader.dataset.full_body)
-                self.train_step_post(render_out, loss, loader, pbar)
+                    pred, loss = self.train_step(data, loader.dataset.full_body)
+
+                self.train_step_post(pred, loss, loader, pbar)
                 loss = loss.item()
 
             total_loss += loss
 
-            if len(loader) <= self.local_step:
+            if self.opt.iters_per_epoch <= self.local_step:
                 break
 
         if self.ema is not None:
@@ -617,13 +622,12 @@ class Trainer(object):
         self.global_step += n_steps
         self.optimizer.zero_grad()
 
-    def train_step_post(self, render_out, loss, loader, pbar):
+    def train_step_post(self, pred, loss, loader, pbar):
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
 
-        if self.global_step % self.opt.save_image_interval == 0:
-            pred = torch.cat([render_out['image'], render_out['normal']], dim=2)
+        if pred is not None:
             save_path = os.path.join(self.workspace, 'train-vis', f'{self.name}/{self.global_step:04d}.jpg')
             self.save_images(pred, save_path)
 

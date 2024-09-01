@@ -28,14 +28,16 @@ if __name__ == '__main__':
     ])
     # cfg.model.merge_from_list(['mesh', args.mesh])
     # cfg.training.merge_from_list(['workspace', args.workspace])
-    cfg.freeze()
 
     seed_everything(cfg.seed)
 
+    exp_cfg = None
     if cfg.guidance.name == 'imagedream':
         exp_cfg: three_cfg.ExperimentConfig
         exp_cfg = three_cfg.load_config("ImageDream/configs/imagedream-sd21-shading.yaml")
+        cfg.batch_size = exp_cfg.data.batch_size
 
+    cfg.freeze()
 
     def build_dataloader(phase):
         """
@@ -50,7 +52,7 @@ if __name__ == '__main__':
             dataset = mv.RandomMultiviewCameraIterableDataset(config)
             return DataLoader(dataset, batch_size=cfg.batch_size, num_workers=0, collate_fn=dataset.collate)
         else:
-            size = 100
+            size = cfg.training.iters_per_epoch
             if cfg.training.strategy == "sir":
                 size = cfg.batch_size
             if phase == "val":
@@ -67,7 +69,7 @@ if __name__ == '__main__':
             from lib.guidance.multiview_diffusion import MultiviewDiffusion
             from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
             prompt_processor = StableDiffusionPromptProcessor(exp_cfg.system.prompt_processor)
-            return MultiviewDiffusion(exp_cfg.system.guidance, prompt_processor())
+            return MultiviewDiffusion(exp_cfg.system.guidance, opt, prompt_processor())
         elif opt.name == 'sd':
             from lib.guidance.sd import StableDiffusion
             return StableDiffusion(device, cfg.fp16, opt)
@@ -134,13 +136,13 @@ if __name__ == '__main__':
                           lr_scheduler=scheduler,
                           scheduler_update_every_step=True
                           )
-        trainer.save_config(cfg)
+        trainer.save_config(cfg, exp_cfg)
 
         if os.path.exists(cfg.data.image):
             trainer.default_view_data = train_loader.dataset.get_default_view_data()
 
         valid_loader = build_dataloader('val')
-        max_epoch = np.ceil(cfg.training.iters / (len(train_loader) * train_loader.batch_size * cfg.training.sir_recon_iters)).astype(np.int32)
+        max_epoch = np.ceil(cfg.training.iters / cfg.training.iters_per_epoch).astype(np.int32)
         trainer.train(train_loader, valid_loader, max_epoch)
 
         # test

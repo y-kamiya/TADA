@@ -253,7 +253,7 @@ class DLMesh(nn.Module):
                     {'params': self.geo_net.parameters(), 'lr': lr},
                 ])
             else:
-                params.append({'params': self.v_offsets, 'lr': 0.0001})
+                params.append({'params': self.v_offsets, 'lr': lr * 0.01})
 
             if not self.lock_beta:
                 params.append({'params': self.betas, 'lr': 0.1})
