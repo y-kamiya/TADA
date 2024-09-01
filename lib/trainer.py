@@ -230,6 +230,20 @@ class Trainer(object):
                 print(*args, file=self.log_ptr)
                 self.log_ptr.flush()  # write immediately to file
 
+    def make_divisible(self, x, y):
+        remainder = x % y
+        return x if remainder == 0 else x + (y - remainder)
+
+    def calc_annealed_size(self, h, w):
+        if not self.opt.anneal_tex_reso:
+            return h, w
+
+        scale = min(1, self.global_step / (0.8 * self.opt.iters))
+
+        h_anneal = max(self.make_divisible(int(h * scale), 16), self.opt.anneal_tex_reso_size)
+        w_anneal = max(self.make_divisible(int(w * scale), 16), self.opt.anneal_tex_reso_size)
+        return h_anneal, w_anneal
+
     def train_step_sir(self, data, is_full_body, loader, pbar):
         assert self.dpt is not None and self.isnet is not None
         bs = data["mvp"].shape[0]
@@ -238,14 +252,7 @@ class Trainer(object):
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
 
-        H_anneal, W_anneal = H, W
-        if self.opt.anneal_tex_reso:
-            scale = min(1, self.global_step / (0.8 * self.opt.iters))
-
-            def make_divisible(x, y): return x + (y - x % y)
-
-            H_anneal = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
-            W_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+        H_anneal, W_anneal = self.calc_annealed_size(H, W)
 
         self.log(f"batch_size: {bs}, annel resolution: ({H_anneal}, {W_anneal})")
 
@@ -328,14 +335,7 @@ class Trainer(object):
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
 
-        # TEST: progressive training resolution
-        if self.opt.anneal_tex_reso:
-            scale = min(1, self.global_step / (0.8 * self.opt.iters))
-
-            def make_divisible(x, y): return x + (y - x % y)
-
-            H = max(make_divisible(int(H * scale), 16), 32)
-            W = max(make_divisible(int(W * scale), 16), 32)
+        H, W = self.calc_annealed_size(H, W)
 
         if do_rgbd_loss and self.opt.known_view_noise_scale > 0:
             noise_scale = self.opt.known_view_noise_scale  # * (1 - self.global_step / self.opt.iters)
