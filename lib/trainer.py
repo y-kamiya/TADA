@@ -511,7 +511,7 @@ class Trainer(object):
         with torch.no_grad():
 
             for i, data in enumerate(loader):
-                with torch.cuda.amp.autocast(enabled=self.fp16):
+                with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
                     preds, _ = self.test_step(data)
 
                 pred = preds[0].detach().cpu().numpy()

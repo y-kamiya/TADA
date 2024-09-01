@@ -108,8 +108,10 @@ if __name__ == '__main__':
                           fp16=cfg.fp16
                           )
 
-        test_loader = build_dataloader('test')
+        valid_loader = build_dataloader('val')
+        trainer.evaluate(valid_loader)
 
+        test_loader = build_dataloader('test')
         trainer.test(test_loader)
 
         if cfg.save_mesh:
