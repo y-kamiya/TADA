@@ -138,12 +138,14 @@ class StableDiffusion(nn.Module):
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, **kargs):
+    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, sr_model=None, **kwargs):
         pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
         latents = self.encode_imgs(pred_rgb_scaled)
 
         t2_schedule_current = self.opt.t2_schedule[0] - t_annel * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
-        t1_index = torch.tensor(t2_schedule_current * self.opt.denoise_steps * 0.6, dtype=torch.long, device=self.device)
+        if t2_schedule_current >= 1.0:
+            t2_schedule_current = 0.999999
+        t1_index = int(t2_schedule_current * self.opt.denoise_steps * self.opt.t1_ratio)
         t1 = self.inverse_scheduler.timesteps[t1_index]
         t2 = t2_schedule_current * self.num_train_timesteps
 
@@ -163,7 +165,7 @@ class StableDiffusion(nn.Module):
             if t2 < t:
                 continue
             noise_pred = self.pred_noise(latents_noisy, t, text_embeddings)
-            latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=0.0).prev_sample.to(latents.dtype)
+            latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
 
         x0 = self.decode_latents(latents_noisy)
 
