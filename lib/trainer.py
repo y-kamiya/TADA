@@ -24,6 +24,7 @@ from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 from lib.isnet import ISNet
 
+import threestudio.utils.config as three_cfg
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
 from imagedream.camera_utils import convert_blender_to_opengl
 
@@ -181,10 +182,13 @@ class Trainer(object):
                 self.log(f"[INFO] Loading {self.use_checkpoint} ...")
                 self.load_checkpoint(self.use_checkpoint)
 
-    def save_config(self, cfg):
+    def save_config(self, cfg, exp_cfg):
         cfg_path = os.path.join(self.workspace, 'config.yaml')
         with open(cfg_path, "w") as f:
             print(cfg, file=f)
+
+        cfg_path = os.path.join(self.workspace, 'config_threestudio.yaml')
+        three_cfg.dump_config(cfg_path, exp_cfg)
     
     # calculate the text embeddings.
     def prepare_text_embeddings(self):
