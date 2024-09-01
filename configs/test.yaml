@@ -1,0 +1,12 @@
+name: 'with_normal_supervision'
+fp16: False
+test: True
+model:
+  albedo_res: 2048
+  ssaa: 2
+training:
+  ckpt: "output/with_normal_supervision/link512_t_text_sd21_45000/checkpoints/with_normal_supervision_ep0450.pth"
+  workspace: "output"
+data:
+  H: 1024
+  W: 1024
