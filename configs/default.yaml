@@ -51,6 +51,7 @@ training:
   use_isnet: False
   use_lpips: False
   strategy: 'sds'
+  sr: 1
   sir_recon_iters: 1
 data:
   h: 512

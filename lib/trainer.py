@@ -88,7 +88,7 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
-        self.realesrgan = RealESRGAN(self.device, 2)
+        self.realesrgan = RealESRGAN(self.device, opt.sr) if opt.sr > 1 else None
         self.isnet = ISNet(self.device) if opt.use_isnet else None
         self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
         self.model = model.to(self.device)
