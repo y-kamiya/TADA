@@ -56,8 +56,8 @@ training:
 data:
   h: 512
   w: 512
-  H: 800
-  W: 800
+  H: 1024
+  W: 1024
   near: 0.01
   far: 1000
   fovy_range: [50, 70]
