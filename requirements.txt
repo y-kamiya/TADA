@@ -24,4 +24,5 @@ ninja
 mediapipe
 timm
 lpips
+git+https://github.com/y-kamiya/BasicSR.git@fix/latest-torchvision
 git+https://github.com/NVlabs/nvdiffrast.git

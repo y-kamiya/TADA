@@ -92,7 +92,7 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, **kwargs):
+    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, sr_model=None, **kwargs):
         assert kwargs["c2w"] is not None and kwargs["fovy"] is not None
 
         pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
@@ -129,6 +129,9 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
             latents_noisy = self.scheduler.step(noise_pred[:-1], t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
 
         x0 = self.decode_latents(latents_noisy)
+
+        if sr_model is not None:
+            x0 = sr_model(x0)
 
         return F.interpolate(x0, (pred_rgb.shape[-2], pred_rgb.shape[-1]), mode='bilinear', align_corners=False)
 

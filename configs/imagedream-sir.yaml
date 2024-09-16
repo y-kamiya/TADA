@@ -7,7 +7,7 @@ guidance:
   name: imagedream
   guidance_scale: 3.0
   denoise_steps: 25
-  t2_schedule: [0.8, 0.6]
+  t2_schedule: [0.8, 0.4]
   t1_ratio: 0.6
   ddim_eta: 0.0
 model:
@@ -34,6 +34,7 @@ training:
   use_isnet: True
   use_lpips: True
   strategy: 'sir'
+  sr: 2
   lambda_lpips: 0.01
   lambda_rgb: 0.8
   lambda_mask: 0.04

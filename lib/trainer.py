@@ -1,3 +1,4 @@
+import sys
 import glob
 import random
 import tqdm
@@ -23,6 +24,7 @@ from lib.common.utils import *
 from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 from lib.isnet import ISNet
+from lib.sr import RealESRGAN
 
 import threestudio.utils.config as three_cfg
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
@@ -86,6 +88,7 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
+        self.realesrgan = RealESRGAN(self.device, opt.sr) if opt.sr > 1 else None
         self.isnet = ISNet(self.device) if opt.use_isnet else None
         self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
         self.model = model.to(self.device)
@@ -227,6 +230,20 @@ class Trainer(object):
                 print(*args, file=self.log_ptr)
                 self.log_ptr.flush()  # write immediately to file
 
+    def make_divisible(self, x, y):
+        remainder = x % y
+        return x if remainder == 0 else x + (y - remainder)
+
+    def calc_annealed_size(self, h, w):
+        if not self.opt.anneal_tex_reso:
+            return h, w
+
+        scale = min(1, self.global_step / (0.8 * self.opt.iters))
+
+        h_anneal = max(self.make_divisible(int(h * scale), 16), self.opt.anneal_tex_reso_size)
+        w_anneal = max(self.make_divisible(int(w * scale), 16), self.opt.anneal_tex_reso_size)
+        return h_anneal, w_anneal
+
     def train_step_sir(self, data, is_full_body, loader, pbar):
         assert self.dpt is not None and self.isnet is not None
         bs = data["mvp"].shape[0]
@@ -235,14 +252,7 @@ class Trainer(object):
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
 
-        H_anneal, W_anneal = H, W
-        if self.opt.anneal_tex_reso:
-            scale = min(1, self.global_step / (0.8 * self.opt.iters))
-
-            def make_divisible(x, y): return x + (y - x % y)
-
-            H_anneal = max(make_divisible(int(H * scale), 16), self.opt.anneal_tex_reso_size)
-            W_anneal = max(make_divisible(int(W * scale), 16), self.opt.anneal_tex_reso_size)
+        H_anneal, W_anneal = self.calc_annealed_size(H, W)
 
         self.log(f"batch_size: {bs}, annel resolution: ({H_anneal}, {W_anneal})")
 
@@ -260,7 +270,7 @@ class Trainer(object):
         with torch.no_grad():
             data["is_full_body"] = is_full_body
             data["comp_rgb_bg"] = out["bg_color"]
-            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, **data)
+            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
             dpt_normal = dpt_normal_raw * mask + (1 - mask)
@@ -293,17 +303,24 @@ class Trainer(object):
                  + self.opt.lambda_rgb * loss_rgb \
                  + self.opt.lambda_mask * loss_mask \
                  + self.opt.lambda_normal * loss_normal
+            # print(loss_lpips, loss_rgb, loss_mask, loss_normal)
+            del loss_rgb
+            del loss_lpips
+            del loss_normal
+            del loss_mask
 
             total_loss += loss.item()
 
             pred = None
             if self.global_step % self.opt.save_image_interval == 0:
+                img, refined_img = image.detach(), refined_image
                 if self.opt.anneal_tex_reso:
                     img = VF.resize(image.detach(), (H, W))
                     refined_img = VF.resize(refined_image, (H, W))
                 pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
 
             self.train_step_post(pred, loss, loader, pbar)
+            del loss
 
         return pred, total_loss
 
@@ -318,14 +335,7 @@ class Trainer(object):
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
 
-        # TEST: progressive training resolution
-        if self.opt.anneal_tex_reso:
-            scale = min(1, self.global_step / (0.8 * self.opt.iters))
-
-            def make_divisible(x, y): return x + (y - x % y)
-
-            H = max(make_divisible(int(H * scale), 16), 32)
-            W = max(make_divisible(int(W * scale), 16), 32)
+        H, W = self.calc_annealed_size(H, W)
 
         if do_rgbd_loss and self.opt.known_view_noise_scale > 0:
             noise_scale = self.opt.known_view_noise_scale  # * (1 - self.global_step / self.opt.iters)
@@ -654,7 +664,7 @@ class Trainer(object):
 
     def save_images(self, images, output_path):
         imgs = torch.cat(images.split(1), dim=1)
-        imgs = (imgs[0].detach().cpu().numpy() * 255).astype(np.uint8)
+        imgs = (imgs[0].detach().cpu().clamp_(0, 1).numpy() * 255).astype(np.uint8)
         imgs = cv2.cvtColor(imgs, cv2.COLOR_RGB2BGR)
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         cv2.imwrite(output_path, imgs)

@@ -500,7 +500,7 @@ class ViewDataset(torch.utils.data.Dataset):
             camera_type = "body"
             # circle pose
             radius = 1.3
-            fov = 50
+            fov = 60
             phis = (idx / self.size) * 360
             thetas = 75
             poses, dirs = circle_poses(
