@@ -70,7 +70,7 @@ class Trainer(object):
         self.world_size = world_size
 
         self.workspace = os.path.join(opt.workspace, self.name, self.text)
-        if os.path.exists(self.workspace):
+        if os.path.exists(self.workspace) and opt.ckpt == "scratch":
             self.workspace = os.path.join(opt.workspace, self.name, self.text + str(uuid4())[:8])
 
         self.ema_decay = ema_decay
