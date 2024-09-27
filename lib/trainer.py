@@ -244,6 +244,26 @@ class Trainer(object):
         w_anneal = max(self.make_divisible(int(w * scale), 16), self.opt.anneal_tex_reso_size)
         return h_anneal, w_anneal
 
+    def sample_refined_images(self, data):
+        if "image" in data and data["image"] is not None:
+            return data["image"]
+
+        dir_text_z = None
+        if "camera_type" in data:
+            bs = data["mvp"].shape[0]
+            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
+            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
+            dir_text_z = torch.cat([uncond, cond])
+
+        with torch.no_grad():
+            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
+            mask = self.isnet(refined_image)
+            dpt_normal_raw = self.dpt(refined_image)
+            dpt_normal = dpt_normal_raw * mask + (1 - mask)
+            # dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+
+        return refined_image
+
     def train_step_sir(self, data, is_full_body, loader, pbar):
         assert self.dpt is not None and self.isnet is not None
         bs = data["mvp"].shape[0]
@@ -261,22 +281,11 @@ class Trainer(object):
             out = self.model(rays_o, rays_d, mvp, H, W, shading='albedo')
         image = out['image'].permute(0, 3, 1, 2)
 
-        dir_text_z = None
-        if "camera_type" in data:
-            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
-            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
-            dir_text_z = torch.cat([uncond, cond])
-
-        with torch.no_grad():
-            data["is_full_body"] = is_full_body
-            data["comp_rgb_bg"] = out["bg_color"]
-            refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
-            mask = self.isnet(refined_image)
-            dpt_normal_raw = self.dpt(refined_image)
-            dpt_normal = dpt_normal_raw * mask + (1 - mask)
-            # dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
-            if self.opt.anneal_tex_reso:
-                refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
+        data["is_full_body"] = is_full_body
+        data["comp_rgb_bg"] = out["bg_color"]
+        refined_image = self.sample_refined_images(data)
+        if self.opt.anneal_tex_reso:
+            refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
 
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):

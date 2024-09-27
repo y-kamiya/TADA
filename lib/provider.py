@@ -515,6 +515,9 @@ class ViewDataset(torch.utils.data.Dataset):
             # fixed focal
             # fov = (self.opt.fovy_range[1] + self.opt.fovy_range[0]) / 2
 
+        return self.build_view_data(fov, thetas, phis, radius, poses, dirs, camera_type)
+
+    def build_view_data(self, fov, thetas, phis, radius, poses, dirs, camera_type):
         focal = self.H / (2 * np.tan(np.deg2rad(fov) / 2))
         intrinsics = np.array([focal, focal, self.cx, self.cy])
 
@@ -559,3 +562,57 @@ class ViewDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.size
+
+
+class ImageViewDataset(ViewDataset):
+    IMG_EXTENSIONS = ['.png', 'jpg']
+
+    def __init__(self, opt, device, type='train', size=4):
+        super().__init__(opt, device, type, size)
+        self.images = self.load_images(opt.data_dir, size)
+        self.transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+
+    @classmethod
+    def is_image_file(self, name):
+        return any(name.endswith(ext) for ext in self.IMG_EXTENSIONS)
+
+    def load_images(self, data_dir, size):
+        paths = []
+        for root, _, fnames in sorted(os.walk(data_dir)):
+            for fname in fnames:
+                if self.is_image_file(fname):
+                    path = os.path.join(root, fname)
+                    paths.append(path)
+
+        n_images = len(paths)
+        assert n_images % 4 == 0, "data size should be multiple of 4"
+        assert size % 4 == 0, "view size should be multiple of 4"
+
+        images = []
+        for idx in range(size):
+            data_idx = idx / size * n_images
+            images.append(Image.open(paths[data_idx]))
+
+        return images
+
+    def __getitem__(self, idx):
+        radius = self.opt.radius_range.sum() / len(self.opt.radius_range)
+        fov = self.opt.default_fovy
+        phis = (idx / self.size) * 360
+        thetas = self.opt.default_polar
+        poses, dirs = circle_poses(
+            self.device,
+            radius=radius,
+            theta=thetas,
+            phi=phis,
+            return_dirs=self.opt.dir_text,
+            angle_overhead=self.opt.angle_overhead,
+            angle_front=self.opt.angle_front)
+
+        data = self.build_view_data(fov, thetas, phis, radius, poses, dirs, camera_type)
+        data["image"] = self.transform(self.images[idx])
+
+        return data
+
