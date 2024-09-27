@@ -2,6 +2,9 @@ import os
 import cv2
 import glob
 import json
+import re 
+import math
+from pathlib import Path
 from tqdm import tqdm
 import random
 import numpy as np
@@ -560,16 +563,20 @@ class ViewDataset(torch.utils.data.Dataset):
 
         return data
 
+    def get_camera_type(self):
+        return "body" if self.full_body else "face"
+
     def __len__(self):
         return self.size
 
 
 class ImageViewDataset(ViewDataset):
     IMG_EXTENSIONS = ['.png', 'jpg']
+    PATTERN = re.compile(r'.*?(\d+).*?')
 
-    def __init__(self, opt, device, type='train', size=4):
-        super().__init__(opt, device, type, size)
-        self.images = self.load_images(opt.data_dir, size)
+    def __init__(self, opt, device, type='train'):
+        super().__init__(opt, device, type, opt.n_views)
+        self.images = self.load_images(opt.data_dir, opt.n_views)
         self.transform = transforms.Compose([
             transforms.ToTensor()
         ])
@@ -578,12 +585,19 @@ class ImageViewDataset(ViewDataset):
     def is_image_file(self, name):
         return any(name.endswith(ext) for ext in self.IMG_EXTENSIONS)
 
+    @classmethod
+    def numerical_order(cls, file):
+        match = cls.PATTERN.match(Path(file).name)
+        if not match:
+            return math.inf
+        return int(match.groups()[0])
+
     def load_images(self, data_dir, size):
         paths = []
-        for root, _, fnames in sorted(os.walk(data_dir)):
-            for fname in fnames:
+        for root, _, fnames in os.walk(data_dir):
+            for fname in sorted(fnames, key=self.numerical_order):
                 if self.is_image_file(fname):
-                    path = os.path.join(root, fname)
+                    path = Path(root) / fname
                     paths.append(path)
 
         n_images = len(paths)
@@ -592,13 +606,13 @@ class ImageViewDataset(ViewDataset):
 
         images = []
         for idx in range(size):
-            data_idx = idx / size * n_images
+            data_idx = int(idx * n_images // size)
             images.append(Image.open(paths[data_idx]))
 
         return images
 
     def __getitem__(self, idx):
-        radius = self.opt.radius_range.sum() / len(self.opt.radius_range)
+        radius = self.opt.default_radius
         fov = self.opt.default_fovy
         phis = (idx / self.size) * 360
         thetas = self.opt.default_polar
@@ -611,8 +625,11 @@ class ImageViewDataset(ViewDataset):
             angle_overhead=self.opt.angle_overhead,
             angle_front=self.opt.angle_front)
 
-        data = self.build_view_data(fov, thetas, phis, radius, poses, dirs, camera_type)
-        data["image"] = self.transform(self.images[idx])
+        data = self.build_view_data(fov, thetas, phis, radius, poses, dirs, self.get_camera_type())
+
+        image = self.transform(self.images[idx])
+        data["image"] = image[:3, :, :]
+        data["alpha"] = image[3:, :, :]
 
         return data
 

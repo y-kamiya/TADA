@@ -190,8 +190,9 @@ class Trainer(object):
         with open(cfg_path, "w") as f:
             print(cfg, file=f)
 
-        cfg_path = os.path.join(self.workspace, 'config_threestudio.yaml')
-        three_cfg.dump_config(cfg_path, exp_cfg)
+        if exp_cfg is not None:
+            cfg_path = os.path.join(self.workspace, 'config_threestudio.yaml')
+            three_cfg.dump_config(cfg_path, exp_cfg)
     
     # calculate the text embeddings.
     def prepare_text_embeddings(self):
@@ -246,7 +247,12 @@ class Trainer(object):
 
     def sample_refined_images(self, data):
         if "image" in data and data["image"] is not None:
-            return data["image"]
+            image = data["image"].to(self.device)
+            mask = data["alpha"].to(self.device)
+            dpt_normal_raw = self.dpt(image)
+            # dpt_normal = dpt_normal_raw * mask + (1 - mask)
+            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            return image, mask, dpt_normal
 
         dir_text_z = None
         if "camera_type" in data:
@@ -259,13 +265,13 @@ class Trainer(object):
             refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
             mask = self.isnet(refined_image)
             dpt_normal_raw = self.dpt(refined_image)
-            dpt_normal = dpt_normal_raw * mask + (1 - mask)
-            # dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            # dpt_normal = dpt_normal_raw * mask + (1 - mask)
+            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
 
-        return refined_image
+        return refined_image, mask, dpt_normal
 
     def train_step_sir(self, data, is_full_body, loader, pbar):
-        assert self.dpt is not None and self.isnet is not None
+        assert self.dpt is not None
         bs = data["mvp"].shape[0]
         H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
@@ -283,9 +289,11 @@ class Trainer(object):
 
         data["is_full_body"] = is_full_body
         data["comp_rgb_bg"] = out["bg_color"]
-        refined_image = self.sample_refined_images(data)
-        if self.opt.anneal_tex_reso:
+        refined_image, mask, dpt_normal = self.sample_refined_images(data)
+        if refined_image.shape[-1] != W_anneal:
             refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
+            mask = VF.resize(mask, (H, W))
+            dpt_normal = VF.resize(dpt_normal, (H, W))
 
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):

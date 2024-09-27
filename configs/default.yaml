@@ -80,6 +80,8 @@ data:
 #  image: "images/xiaole_rgba.png"
 #  image: "../data/tada/ablation_head/Cinderella/validation/ep0069_rgba.png"
   image: ''
+  data_dir: ""
+  n_views: 1
 model:
   mesh: ""
   tex_mlp: False
