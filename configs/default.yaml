@@ -83,6 +83,7 @@ data:
   image: ''
   data_dir: ""
   n_views: 1
+  shuffle: False
 model:
   mesh: ""
   tex_mlp: False

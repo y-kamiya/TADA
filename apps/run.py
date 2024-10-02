@@ -53,7 +53,7 @@ if __name__ == '__main__':
             return DataLoader(dataset, batch_size=cfg.batch_size, num_workers=0, collate_fn=dataset.collate)
         elif opt.name == 'image' and phase == "train":
             dataset = ImageViewDataset(cfg.data, device=device, type=phase)
-            return DataLoader(dataset, batch_size=cfg.batch_size, shuffle=False, num_workers=0)
+            return DataLoader(dataset, batch_size=cfg.batch_size, shuffle=cfg.data.shuffle, num_workers=0)
         else:
             size = cfg.training.iters_per_epoch
             if cfg.training.strategy == "sir":
