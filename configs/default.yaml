@@ -47,6 +47,7 @@ training:
   lambda_mask: 500.
   lambda_normal: 1000.
   lambda_depth: 10.
+  lambda_all: 1.0
   use_dpt: False
   use_isnet: False
   use_lpips: False

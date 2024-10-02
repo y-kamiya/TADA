@@ -320,6 +320,7 @@ class Trainer(object):
                  + self.opt.lambda_rgb * loss_rgb \
                  + self.opt.lambda_mask * loss_mask \
                  + self.opt.lambda_normal * loss_normal
+            loss = loss * self.opt.lambda_all
             # print(loss_lpips, loss_rgb, loss_mask, loss_normal)
             del loss_rgb
             del loss_lpips
