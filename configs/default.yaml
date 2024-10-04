@@ -47,6 +47,7 @@ training:
   lambda_mask: 500.
   lambda_normal: 1000.
   lambda_depth: 10.
+  lambda_all: 1.0
   use_dpt: False
   use_isnet: False
   use_lpips: False
@@ -80,6 +81,9 @@ data:
 #  image: "images/xiaole_rgba.png"
 #  image: "../data/tada/ablation_head/Cinderella/validation/ep0069_rgba.png"
   image: ''
+  data_dir: ""
+  n_views: 1
+  shuffle: False
 model:
   mesh: ""
   tex_mlp: False

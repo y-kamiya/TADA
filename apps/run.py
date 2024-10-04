@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from lib.provider import ViewDataset
+from lib.provider import ViewDataset, ImageViewDataset
 from lib.trainer import *
 from lib.dlmesh import DLMesh
 from lib.common.utils import load_config
@@ -51,6 +51,9 @@ if __name__ == '__main__':
             config = mv.parse_structured(mv.RandomMultiviewCameraDataModuleConfig, exp_cfg.data)
             dataset = mv.RandomMultiviewCameraIterableDataset(config)
             return DataLoader(dataset, batch_size=cfg.batch_size, num_workers=0, collate_fn=dataset.collate)
+        elif opt.name == 'image' and phase == "train":
+            dataset = ImageViewDataset(cfg.data, device=device, type=phase)
+            return DataLoader(dataset, batch_size=cfg.batch_size, shuffle=cfg.data.shuffle, num_workers=0)
         else:
             size = cfg.training.iters_per_epoch
             if cfg.training.strategy == "sir":
@@ -70,6 +73,8 @@ if __name__ == '__main__':
             from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
             prompt_processor = StableDiffusionPromptProcessor(exp_cfg.system.prompt_processor)
             return MultiviewDiffusion(exp_cfg.system.guidance, opt, prompt_processor())
+        elif opt.name == "image":
+            return None
         elif opt.name == 'sd':
             from lib.guidance.sd import StableDiffusion
             return StableDiffusion(device, cfg.fp16, opt)

@@ -1,0 +1,31 @@
+name: 'image'
+batch_size: 4
+guidance:
+  name: image
+training:
+  anneal_tex_reso: True
+  anneal_tex_reso_size: 128
+  train_face_ratio: 0.0
+  iters: 12000
+  iters_per_epoch: 120
+  sir_recon_iters: 15
+  save_image_interval: 100
+  lr: 0.001
+  ckpt: scratch
+  workspace: "output"
+  use_dpt: True
+  use_isnet: False
+  use_lpips: True
+  strategy: 'sir'
+  lambda_lpips: 0.01
+  lambda_rgb: 0.04
+  lambda_mask: 0.04
+  lambda_normal: 0.4
+  lambda_all: 10.
+data:
+  h: 512
+  w: 512
+  default_radius: 1.0
+  data_dir: "data/images/unitychan_a_e0"
+  n_views: 8
+  shuffle: True
