@@ -245,7 +245,7 @@ class Trainer(object):
         w_anneal = max(self.make_divisible(int(w * scale), 16), self.opt.anneal_tex_reso_size)
         return h_anneal, w_anneal
 
-    def sample_refined_images(self, data):
+    def sample_refined_images(self, data, image):
         if "image" in data and data["image"] is not None:
             image = data["image"].to(self.device)
             mask = data["alpha"].to(self.device)
@@ -289,7 +289,7 @@ class Trainer(object):
 
         data["is_full_body"] = is_full_body
         data["comp_rgb_bg"] = out["bg_color"]
-        refined_image, mask, dpt_normal = self.sample_refined_images(data)
+        refined_image, mask, dpt_normal = self.sample_refined_images(data, image)
         if refined_image.shape[-1] != W_anneal:
             refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
             mask = VF.resize(mask, (H, W))
