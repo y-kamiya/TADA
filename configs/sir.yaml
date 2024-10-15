@@ -25,7 +25,7 @@ training:
   ckpt: scratch
   workspace: "output"
   use_dpt: True
-  use_isnet: False
+  use_isnet: True
   use_lpips: True
   strategy: 'sir'
   lambda_lpips: 0.01
