@@ -44,3 +44,4 @@ data:
   theta_range: [85, 90] # dummy
   head_phi_range: [-30, 30] # dummy
   head_theta_range: [75, 85] # dummy
+  near: 0.1 # to adjust camera
