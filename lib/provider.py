@@ -633,3 +633,28 @@ class ImageViewDataset(ViewDataset):
 
         return data
 
+
+class ZoomOutViewDataset(ViewDataset):
+    def __init__(self, opt, device, radius_list, is_full_body=True):
+        super().__init__(opt, device, type="train", size=len(radius_list))
+        self.radius_list = radius_list
+        self.is_full_body = is_full_body
+
+    def __getitem__(self, idx):
+        fov = self.opt.default_fovy
+        phis = [0, 0]
+        thetas = [90, 90]
+
+        r = self.radius_list[idx]
+        radius = [r, r]
+
+        poses, dirs, thetas, phis, radius = near_head_poses(
+            1,
+            self.device,
+            radius_range=radius,
+            theta_range=thetas,
+            phi_range=phis,
+            shift=self.body_center if self.is_full_body else self.face_center,
+            face_scale=self.body_scale if self.is_full_body else self.face_scale,
+            return_dirs=True)
+        return self.build_view_data(fov, thetas, phis, radius, poses, dirs, "body")
