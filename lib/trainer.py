@@ -480,10 +480,11 @@ class Trainer(object):
             self.epoch = epoch
 
             with torch.no_grad():
-                if random.random() < self.opt.train_face_ratio:
+                if self.global_step >= self.opt.train_face_start_steps and random.random() < self.opt.train_face_ratio:
                     train_loader.dataset.full_body = False
                     face_center, face_scale = self.model.get_mesh_center_scale("face")
 
+                    face_center[1] += self.opt.train_face_center_diff_y
                     if isinstance(train_loader.dataset, RandomMultiviewCameraIterableDataset):
                         face_center = torch.tensor([face_center[0], -face_center[2], face_center[1]])
 
