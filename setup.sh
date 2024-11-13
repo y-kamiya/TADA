@@ -1,7 +1,7 @@
 #!/bin/bash -ex
 
-pip install --upgrade 'pip<24.0' wheel
-pip install torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+pip install wheel
 pip install -r requirements.txt -r ImageDream/requirements.txt
  
 pushd smplx
