@@ -25,7 +25,7 @@ from lib.common.visual import draw_landmarks, draw_mediapipe_landmarks
 from lib.dpt import DepthNormalEstimation
 from lib.isnet import ISNet
 from lib.sr import RealESRGAN
-from lib.loss import Smoother
+from lib.loss import MeshRegularizer, PixelRegularizer
 
 import threestudio.utils.config as three_cfg
 from threestudio.data.random_multiview import get_mvp_matrix, RandomMultiviewCameraIterableDataset
@@ -89,7 +89,8 @@ class Trainer(object):
             f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu')
         self.console = Console()
 
-        self.smoother = Smoother(self.device)
+        self.mesh_regularizer = MeshRegularizer(opt)
+        self.pixel_regularizer = PixelRegularizer(opt, self.device)
         self.realesrgan = RealESRGAN(self.device, opt.sr) if opt.sr > 1 else None
         self.isnet = ISNet(self.device) if opt.use_isnet else None
         self.lpips = LPIPS(net='vgg').to(self.device) if opt.use_lpips else None
@@ -292,6 +293,7 @@ class Trainer(object):
         data["is_full_body"] = is_full_body
         data["comp_rgb_bg"] = out["bg_color"]
         refined_image, mask, dpt_normal = self.sample_refined_images(data, image)
+        refined_image_orig = refined_image
         if refined_image.shape[-1] != W_anneal:
             refined_image = VF.resize(refined_image, (H_anneal, W_anneal))
             mask = VF.resize(mask, (H, W))
@@ -317,29 +319,32 @@ class Trainer(object):
             # dpt_normal = (1 - dpt_normal_raw) * alpha + (1 - alpha)
             loss_normal = (1 - F.cosine_similarity(normal, dpt_normal)).mean()
             loss_mask = F.mse_loss(alpha, mask).mean()
-            loss_smooth = self.smoother(refined_image, normal, alpha.detach()).mean()
+            loss_mesh_reg = self.mesh_regularizer(out["mesh"])
+            loss_pixel_reg = self.pixel_regularizer(refined_image_orig, normal, alpha.detach())
 
             loss = self.opt.lambda_lpips * loss_lpips \
                  + self.opt.lambda_rgb * loss_rgb \
                  + self.opt.lambda_mask * loss_mask \
                  + self.opt.lambda_normal * loss_normal \
-                 + 0.013 * loss_smooth
+                 + loss_mesh_reg \
+                 + loss_pixel_reg
             loss = loss * self.opt.lambda_all
             # print(loss_lpips, loss_rgb, loss_mask, loss_normal)
             del loss_rgb
             del loss_lpips
             del loss_normal
             del loss_mask
+            del loss_mesh_reg
+            del loss_pixel_reg
 
             total_loss += loss.item()
 
             pred = None
             if self.global_step % self.opt.save_image_interval == 0:
-                img, refined_img = image.detach(), refined_image
+                img = image.detach()
                 if self.opt.anneal_tex_reso:
                     img = VF.resize(img, (H, W))
-                    refined_img = VF.resize(refined_img, (H, W))
-                pred = torch.cat([img, refined_img, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
+                pred = torch.cat([img, refined_image_orig, normal.detach(), dpt_normal, alpha.detach().repeat(1,3,1,1), mask.repeat(1,3,1,1)], dim=3).permute(0, 2, 3, 1)
 
             self.train_step_post(pred, loss, loader, pbar)
             del loss

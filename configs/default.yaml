@@ -49,6 +49,10 @@ training:
   lambda_mask: 500.
   lambda_normal: 1000.
   lambda_depth: 10.
+  lambda_laplacian: 0.
+  lambda_normal_consistency: 0.
+  lambda_bilateral: 0.
+  lambda_expand: 0.
   lambda_all: 1.0
   use_dpt: False
   use_isnet: False

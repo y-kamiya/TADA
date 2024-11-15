@@ -390,4 +390,5 @@ class DLMesh(nn.Module):
             "alpha": alpha,
             "normal": normal,
             "bg_color": bg_color,
+            "mesh": pr_mesh,
         }
