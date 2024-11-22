@@ -50,7 +50,10 @@ class MeshRegularizer:
         t_pos_idx = pr_mesh.f.to(dtype=torch.int64)
         mesh = Mesh(v_pos, t_pos_idx)
 
-        loss_lap = mesh.laplacian()
+        # avoid sparse to support fp16
+        L = mesh._laplacian_uniform().to_dense()
+        loss_lap = L.mm(v_pos).norm(dim=1).mean()
+
         loss_nc = mesh.normal_consistency()
         loss_expand = 0.5 * F.mse_loss(v_pos, (v_pos + pr_mesh.vn).detach()).mean()
 
