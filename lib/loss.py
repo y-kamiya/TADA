@@ -51,11 +51,18 @@ class MeshRegularizer:
         mesh = Mesh(v_pos, t_pos_idx)
 
         # avoid sparse to support fp16
-        L = mesh._laplacian_uniform().to_dense()
-        loss_lap = L.mm(v_pos).norm(dim=1).mean()
+        loss_lap = 0.
+        if 0. < self.cfg.lambda_laplacian:
+            L = mesh._laplacian_uniform().to_dense()
+            loss_lap = L.mm(v_pos).norm(dim=1).mean()
 
-        loss_nc = mesh.normal_consistency()
-        loss_expand = 0.5 * F.mse_loss(v_pos, (v_pos + pr_mesh.vn).detach()).mean()
+        loss_nc = 0.
+        if 0. < self.cfg.lambda_normal_consistency:
+            loss_nc = mesh.normal_consistency()
+
+        loss_expand = 0.
+        if 0. < self.cfg.lambda_expand:
+            loss_expand = 0.5 * F.mse_loss(v_pos, (v_pos + pr_mesh.vn).detach()).mean()
 
         return self.cfg.lambda_laplacian * loss_lap \
                 + self.cfg.lambda_normal_consistency * loss_nc \
@@ -68,4 +75,7 @@ class PixelRegularizer:
         self.bilateral = BilateralSmoother(device)
 
     def __call__(self, image, normal, alpha):
-        return self.cfg.lambda_bilateral * self.bilateral(image, normal, alpha).mean()
+        if 0. < self.cfg.lambda_bilateral:
+            return self.cfg.lambda_bilateral * self.bilateral(image, normal, alpha).mean()
+
+        return 0.
