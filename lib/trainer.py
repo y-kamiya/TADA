@@ -299,6 +299,13 @@ class Trainer(object):
             mask = VF.resize(mask, (H, W))
             dpt_normal = VF.resize(dpt_normal, (H, W))
 
+        if self.opt.train_face_front and not is_full_body:
+            s, e = bs // 4, bs - (bs // 4)
+            refined_image = refined_image[s:e]
+            refined_image_orig = refined_image_orig[s:e]
+            mask = mask[s:e]
+            dpt_normal = dpt_normal[s:e]
+
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):
             self.train_step_pre(bs)
@@ -310,6 +317,11 @@ class Trainer(object):
                 image = VF.resize(image, (H_anneal, W_anneal))
             normal = out['normal'].permute(0, 3, 1, 2)
             alpha = out['alpha'].permute(0, 3, 1, 2)
+
+            if self.opt.train_face_front and not is_full_body:
+                image = image[s:e]
+                normal = normal[s:e]
+                alpha = alpha[s:e]
 
             loss_rgb = F.l1_loss(image, refined_image)
             with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):

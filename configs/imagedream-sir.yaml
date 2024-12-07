@@ -28,6 +28,7 @@ training:
   train_face_ratio: 0.5
   train_face_scale: 1.6
   train_face_center_diff_y: 0.
+  train_face_front: True
   iters: 9000
   iters_per_epoch: 60
   sir_recon_iters: 15

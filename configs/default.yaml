@@ -36,6 +36,7 @@ training:
   train_face_start_steps: 0
   train_face_scale: 10.0
   train_face_center_diff_y: 0.0
+  train_face_front: False
   eval_interval: 10
   save_image_interval: 20
   workspace: "../data/tada"
