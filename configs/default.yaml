@@ -105,6 +105,10 @@ model:
   init_with_tpose: False
   replace_hands_eyes: True
   ssaa: 2
+  lr_albedo: 10.
+  lr_voffset: 0.01
+  lr_betas: 0.1
+  lr_expression: 0.05
 smpl:
   model_path: 'data/smpl_related/models'
   model_type: 'smpl_vitruvian'

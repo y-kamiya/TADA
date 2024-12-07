@@ -17,7 +17,11 @@ model:
   init_empty_tex: True
   albedo_res: 1024
   mesh: data/init_body/fit_smplx_dense.obj
-  init_with_tpose: True
+  init_with_tpose: False
+  lr_albedo: 10.
+  lr_voffset: 0.1
+  lr_betas: 0.5
+  lr_expression: 0.25
 training:
   anneal_tex_reso: True
   anneal_tex_reso_size: 128

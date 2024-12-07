@@ -244,7 +244,7 @@ class DLMesh(nn.Module):
                     {'params': self.mlp_texture.parameters(), 'lr': lr * 10},
                 ])
             else:
-                params.append({'params': self.raw_albedo, 'lr': lr * 10})
+                params.append({'params': self.raw_albedo, 'lr': lr * self.opt.lr_albedo})
 
         if not self.opt.lock_geo:
             if self.opt.geo_mlp:
@@ -253,13 +253,13 @@ class DLMesh(nn.Module):
                     {'params': self.geo_net.parameters(), 'lr': lr},
                 ])
             else:
-                params.append({'params': self.v_offsets, 'lr': lr * 0.01})
+                params.append({'params': self.v_offsets, 'lr': lr * self.opt.lr_voffset})
 
             if not self.lock_beta:
-                params.append({'params': self.betas, 'lr': 0.1})
+                params.append({'params': self.betas, 'lr': self.opt.lr_betas})
 
             if not self.opt.lock_expression:
-                params.append({'params': self.expression, 'lr': 0.05})
+                params.append({'params': self.expression, 'lr': self.opt.lr_expression})
 
             if not self.opt.lock_pose:
                 params.append({'params': self.body_pose, 'lr': 0.05})
