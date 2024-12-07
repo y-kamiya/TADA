@@ -36,6 +36,7 @@ training:
   train_face_start_steps: 0
   train_face_scale: 10.0
   train_face_center_diff_y: 0.0
+  train_face_front: False
   eval_interval: 10
   save_image_interval: 20
   workspace: "../data/tada"
@@ -105,6 +106,10 @@ model:
   init_with_tpose: False
   replace_hands_eyes: True
   ssaa: 2
+  lr_albedo: 10.
+  lr_voffset: 0.01
+  lr_betas: 0.1
+  lr_expression: 0.05
 smpl:
   model_path: 'data/smpl_related/models'
   model_type: 'smpl_vitruvian'
