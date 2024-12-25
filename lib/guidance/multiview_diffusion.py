@@ -6,6 +6,8 @@ from threestudio.models.guidance.multiview_diffusion_guidance import MultiviewDi
 from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
 from imagedream.ldm.util import add_random_background
 
+from lib.guidance.guidance import Guidance
+
 
 scheduler_config = {
     "_class_name": "DDIMScheduler",
@@ -27,7 +29,7 @@ scheduler_config = {
 }
 
 
-class MultiviewDiffusion(MultiviewDiffusionGuidance):
+class MultiviewDiffusion(MultiviewDiffusionGuidance, Guidance):
     def __init__(self, three_cfg, opt, prompt_utils):
         super().__init__(three_cfg)
         self.opt = opt
@@ -53,7 +55,10 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         )
         return output["loss_sds"]
 
-    def build_context(self, text_embeddings, **kwargs):
+    def build_context(self, _, **kwargs):
+        text_embeddings = self.prompt_utils.get_text_embeddings(
+            kwargs["elevation"], kwargs["azimuth"], kwargs["camera_distances"], False
+        )
         camera = self.get_camera_cond(kwargs["c2w"], kwargs["fovy"])
         camera = camera.repeat(2, 1).to(text_embeddings)
 
@@ -74,14 +79,16 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
             "camera": camera,
             "num_frames": 5,
             "ip": ip,
-        }, ip_img
+            "ip_img": ip_img,
+        }
 
     @torch.no_grad()
-    def pred_noise(self, latents_noisy, t, context, ip, guidance_scale=None):
+    def pred_noise(self, latents_noisy, t, context, guidance_scale=None):
         latent_model_input = latents_noisy.repeat((2, 1, 1, 1))
         t_expand = torch.tensor(t, device=latents_noisy.device).repeat(latent_model_input.shape[0])
 
-        latent_model_input, t_expand, context = self.append_extra_view(latent_model_input, t_expand, context.copy(), ip=ip)
+        c = context.copy()
+        latent_model_input, t_expand, context = self.append_extra_view(latent_model_input, t_expand, c, ip=c["ip_img"])
         noise_pred = self.model.apply_model(latent_model_input, t_expand, context)
 
         noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
@@ -89,51 +96,8 @@ class MultiviewDiffusion(MultiviewDiffusionGuidance):
         if guidance_scale is None:
             guidance_scale = self.opt.guidance_scale
 
-        return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-
-    @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, sr_model=None, **kwargs):
-        assert kwargs["c2w"] is not None and kwargs["fovy"] is not None
-
-        pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
-        latents = self.encode_images(pred_rgb_scaled)
-
-        t2_schedule_current = self.opt.t2_schedule[0] - t_annel * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
-        if t2_schedule_current >= 1.0:
-            t2_schedule_current = 0.999999
-        t1_index = int(t2_schedule_current * self.opt.denoise_steps * self.opt.t1_ratio)
-        t1 = self.inverse_scheduler.timesteps[t1_index]
-        t2 = t2_schedule_current * self.num_train_timesteps
-
-        noise = torch.randn_like(latents)
-        latents_noisy = self.scheduler.add_noise(latents, noise, t1)
-
-        text_embeddings = self.prompt_utils.get_text_embeddings(
-            kwargs["elevation"], kwargs["azimuth"], kwargs["camera_distances"], False
-        )
-        context, ip_img = self.build_context(text_embeddings, **kwargs)
-
-        for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
-            t_prev = self.inverse_scheduler.timesteps[i+1]
-            if t_prev <= t1:
-                continue
-            if t2 < t_prev:
-                break
-            noise_pred = self.pred_noise(latents_noisy, t, context, ip_img, guidance_scale=0)
-            latents_noisy = self.inverse_scheduler.step(noise_pred[:-1], t_prev, latents_noisy).prev_sample
-
-        for t in self.scheduler.timesteps:
-            if t2 < t:
-                continue
-            noise_pred = self.pred_noise(latents_noisy, t, context, ip_img)
-            latents_noisy = self.scheduler.step(noise_pred[:-1], t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
-
-        x0 = self.decode_latents(latents_noisy)
-
-        if sr_model is not None:
-            x0 = sr_model(x0)
-
-        return F.interpolate(x0, (pred_rgb.shape[-2], pred_rgb.shape[-1]), mode='bilinear', align_corners=False)
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+        return noise_pred[:-1]
 
     def decode_latents(self, latents):
         imgs = self.model.decode_first_stage(latents)

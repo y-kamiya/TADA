@@ -13,6 +13,8 @@ import torch.nn.functional as F
 from torch.cuda.amp import custom_bwd, custom_fwd
 # from .perpneg_utils import weighted_perpendicular_aggregator
 
+from lib.guidance.guidance import Guidance
+
 
 class SpecifyGradient(torch.autograd.Function):
     @staticmethod
@@ -36,9 +38,9 @@ def seed_everything(seed):
     # torch.backends.cudnn.benchmark = True
 
 
-class StableDiffusion(nn.Module):
+class StableDiffusion(Guidance):
     def __init__(self, device, fp16, opt):
-        super().__init__()
+        super().__init__(opt)
 
         self.device = device
         self.opt = opt
@@ -95,9 +97,6 @@ class StableDiffusion(nn.Module):
         # self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(self.pipeline.scheduler.config)
         self.scheduler = self.pipeline.scheduler
         self.scheduler.set_timesteps(self.opt.denoise_steps)
-        self.num_train_timesteps = self.scheduler.config.num_train_timesteps
-        self.min_step = int(self.num_train_timesteps * opt.t_range[0])
-        self.max_step = int(self.num_train_timesteps * opt.t_range[1])
         self.alphas = self.scheduler.alphas_cumprod.to(self.device)  # for convenience
 
         self.inverse_scheduler = DDIMInverseScheduler.from_config(self.scheduler.config)
@@ -124,11 +123,16 @@ class StableDiffusion(nn.Module):
 
         return text_embeddings
 
+    def build_context(self, text_embeddings, **kwargs):
+        return {
+            "context": text_embeddings,
+        }
+
     @torch.no_grad()
-    def pred_noise(self, latents_noisy, t, text_embeddings, guidance_scale=None):
+    def pred_noise(self, latents_noisy, t, context, guidance_scale=None):
         latent_model_input = latents_noisy.repeat((2, 1, 1, 1))
         t = t.repeat(2) if t.dim() > 0 else t
-        noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=text_embeddings).sample
+        noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=context["context"]).sample
 
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
 
@@ -136,82 +140,6 @@ class StableDiffusion(nn.Module):
             guidance_scale = self.opt.guidance_scale
 
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-
-    @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, sr_model=None, **kwargs):
-        pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
-        latents = self.encode_imgs(pred_rgb_scaled)
-
-        t2_schedule_current = self.opt.t2_schedule[0] - t_annel * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
-        if t2_schedule_current >= 1.0:
-            t2_schedule_current = 0.999999
-        t1_index = int(t2_schedule_current * self.opt.denoise_steps * self.opt.t1_ratio)
-        t1 = self.inverse_scheduler.timesteps[t1_index]
-        t2 = t2_schedule_current * self.num_train_timesteps
-
-        noise = torch.randn_like(latents)
-        latents_noisy = self.scheduler.add_noise(latents, noise, t1)
-
-        for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
-            t_prev = self.inverse_scheduler.timesteps[i+1]
-            if t_prev <= t1:
-                continue
-            if t2 < t_prev:
-                break
-            noise_pred = self.pred_noise(latents_noisy, t, text_embeddings, guidance_scale=0)
-            latents_noisy = self.inverse_scheduler.step(noise_pred, t_prev, latents_noisy).prev_sample
-
-        for t in self.scheduler.timesteps:
-            if t2 < t:
-                continue
-            noise_pred = self.pred_noise(latents_noisy, t, text_embeddings)
-            latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
-
-        x0 = self.decode_latents(latents_noisy)
-
-        if sr_model is not None:
-            x0 = sr_model(x0)
-
-        return F.interpolate(x0, (pred_rgb.shape[-2], pred_rgb.shape[-1]), mode='bicubic', align_corners=False)
-
-    def train_step(self, text_embeddings, pred_rgb, guidance_scale=None, rgb_as_latents=False, data=None, bg_color=None, is_full_body=True):
-        if rgb_as_latents:
-            latents = F.interpolate(pred_rgb, (64, 64), mode='bilinear', align_corners=False)
-            latents = latents * 2 - 1
-        else:
-            pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
-            latents = self.encode_imgs(pred_rgb_scaled)
-
-        # latents = torch.mean(latents, keepdim=True, dim=0)
-
-        # timestep ~ U(0.02, 0.98) to avoid very high/low noise level
-        t = torch.randint(self.min_step, self.max_step + 1, (latents.shape[0],), dtype=torch.long, device=self.device)
-
-        # _t = time.time()
-        with torch.no_grad():
-            # add noise
-            noise = torch.randn_like(latents)
-            latents_noisy = self.scheduler.add_noise(latents, noise, t)
-            noise_pred = self.pred_noise(latents_noisy, t, text_embeddings, guidance_scale)
-
-        # w(t), sigma_t^2
-        if self.weighting_strategy == "sds":
-            # w(t), sigma_t^2
-            w = (1 - self.alphas[t]).view(-1, 1, 1, 1)
-        elif self.weighting_strategy == "fantasia3d":
-            w = (self.alphas[t] ** 0.5 * (1 - self.alphas[t])).view(-1, 1, 1, 1)
-        else:
-            raise ValueError(
-                f"Unknown weighting strategy: {self.cfg.weighting_strategy}"
-            )
-
-        grad = w * (noise_pred - noise)
-        grad = torch.nan_to_num(grad)
-
-        # d(loss)/d(latents) = latents - target = latents - (latents - grad) = grad
-        loss = 0.5 * F.mse_loss(latents, (latents - grad).detach(), reduction="sum") / latents.shape[0]
-
-        return loss
 
     def produce_latents(self, text_embeddings, height=512, width=512, guidance_scale=7.5,
                         latents=None):
@@ -238,7 +166,7 @@ class StableDiffusion(nn.Module):
 
         return imgs
 
-    def encode_imgs(self, imgs):
+    def encode_images(self, imgs):
         # imgs: [B, 3, H, W]
         with torch.cuda.amp.autocast(enabled=True, dtype=torch.float32):
             imgs = 2 * imgs - 1

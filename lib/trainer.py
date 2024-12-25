@@ -106,9 +106,6 @@ class Trainer(object):
         # text prompt
         self.text_embeds = None
         if self.guidance is not None:
-            self.guidance.requires_grad_(False)
-            # for p in self.guidance.parameters():
-            #     p.requires_grad = False
             self.prepare_text_embeddings()
 
         # try out torch 2.0
