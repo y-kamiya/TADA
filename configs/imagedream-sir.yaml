@@ -50,6 +50,7 @@ training:
   lambda_bilateral: 0.1
   lambda_expand: 0.0
   lambda_all: 0.1
+  reverse_dpt_normal: False
 data:
   phi_range: [-180, 180] # dummy
   theta_range: [85, 90] # dummy

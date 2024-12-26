@@ -245,13 +245,18 @@ class Trainer(object):
         w_anneal = max(self.make_divisible(int(w * scale), 16), self.opt.anneal_tex_reso_size)
         return h_anneal, w_anneal
 
+    def dpt_normal(self, image, mask):
+        dpt_normal_raw = self.dpt(image)
+        if self.opt.reverse_dpt_normal:
+            dpt_normal_raw = 1 - dpt_normal_raw
+
+        return dpt_normal_raw * mask + (1 - mask)
+
     def sample_refined_images(self, data, image):
         if "image" in data and data["image"] is not None:
             image = data["image"].to(self.device)
             mask = data["alpha"].to(self.device)
-            dpt_normal_raw = self.dpt(image)
-            # dpt_normal = dpt_normal_raw * mask + (1 - mask)
-            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            dpt_normal = self.dpt_normal(image, mask)
             return image, mask, dpt_normal
 
         dir_text_z = None
@@ -264,9 +269,7 @@ class Trainer(object):
         with torch.no_grad():
             refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
             mask = self.isnet(refined_image)
-            dpt_normal_raw = self.dpt(refined_image)
-            # dpt_normal = dpt_normal_raw * mask + (1 - mask)
-            dpt_normal = (1 - dpt_normal_raw) * mask + (1 - mask)
+            dpt_normal = self.dpt_normal(refined_image, mask)
 
         return refined_image, mask, dpt_normal
 
@@ -437,8 +440,7 @@ class Trainer(object):
                     loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
                 elif self.dpt is not None :
                     # normal image loss
-                    dpt_normal = self.dpt(image)
-                    dpt_normal = (1 - dpt_normal) * alpha + (1 - alpha)
+                    dpt_normal = self.dpt_normal(image, alpha)
                     lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
                     loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
 

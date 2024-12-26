@@ -61,6 +61,7 @@ training:
   strategy: 'sds'
   sr: 1
   sir_recon_iters: 1
+  reverse_dpt_normal: True
 data:
   h: 512
   w: 512
