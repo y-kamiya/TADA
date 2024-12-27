@@ -73,6 +73,9 @@ if __name__ == '__main__':
             from threestudio.models.prompt_processors.stable_diffusion_prompt_processor import StableDiffusionPromptProcessor
             prompt_processor = StableDiffusionPromptProcessor(exp_cfg.system.prompt_processor)
             return MultiviewDiffusion(exp_cfg.system.guidance, opt, prompt_processor())
+        elif opt.name == "sv3d":
+            from lib.guidance.sv3d import StableVideo3d
+            return StableVideo3d(device, cfg.fp16, opt)
         elif opt.name == "image":
             return None
         elif opt.name == 'sd':
