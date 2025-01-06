@@ -59,11 +59,11 @@ class Guidance:
         raise NotImplementedError
 
     @torch.no_grad()
-    def sample_refined_images(self, text_embeddings, pred_rgb, t_annel, sr_model=None, **kwargs):
+    def sample_refined_images(self, text_embeddings, pred_rgb, t_anneal, sr_model=None, **kwargs):
         pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
         latents = self.encode_images(pred_rgb_scaled)
 
-        t2_schedule_current = self.opt.t2_schedule[0] - t_annel * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
+        t2_schedule_current = self.opt.t2_schedule[0] - t_anneal * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
         if t2_schedule_current >= 1.0:
             t2_schedule_current = 0.999999
         t1_index = int(t2_schedule_current * self.opt.denoise_steps * self.opt.t1_ratio)
@@ -81,12 +81,14 @@ class Guidance:
                 continue
             if t2 < t_prev:
                 break
+            print(t)
             noise_pred = self.pred_noise(latents_noisy, t, context, guidance_scale=0)
             latents_noisy = self.inverse_scheduler.step(noise_pred, t_prev, latents_noisy).prev_sample
 
         for t in self.scheduler.timesteps:
             if t2 < t:
                 continue
+            print(t)
             noise_pred = self.pred_noise(latents_noisy, t, context)
             latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
 
