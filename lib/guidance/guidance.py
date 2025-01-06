@@ -67,30 +67,33 @@ class Guidance:
         if t2_schedule_current >= 1.0:
             t2_schedule_current = 0.999999
         t1_index = int(t2_schedule_current * self.opt.denoise_steps * self.opt.t1_ratio)
-        t1 = self.inverse_scheduler.timesteps[t1_index]
+        # t1 = self.inverse_scheduler.timesteps[t1_index:t1_index+1]
+        t1 = self.scheduler.timesteps[(self.opt.denoise_steps - t1_index)-1:(self.opt.denoise_steps - t1_index)]
         t2 = t2_schedule_current * self.num_train_timesteps
+        print(t1_index, t1, t2)
 
         noise = torch.randn_like(latents)
         latents_noisy = self.scheduler.add_noise(latents, noise, t1)
 
         context = self.build_context(text_embeddings, **kwargs)
 
-        for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
-            t_prev = self.inverse_scheduler.timesteps[i+1]
-            if t_prev <= t1:
-                continue
-            if t2 < t_prev:
-                break
-            print(t)
-            noise_pred = self.pred_noise(latents_noisy, t, context, guidance_scale=0)
-            latents_noisy = self.inverse_scheduler.step(noise_pred, t_prev, latents_noisy).prev_sample
+        # for i, t in enumerate(self.inverse_scheduler.timesteps[:-1]):
+        #     t_prev = self.inverse_scheduler.timesteps[i+1]
+        #     if t_prev <= t1:
+        #         continue
+        #     if t2 < t_prev:
+        #         break
+        #     print(f"t1: {t}")
+        #     noise_pred = self.pred_noise(latents_noisy, t, context, guidance_scale=0, is_inverse=True)
+        #     latents_noisy = self.inverse_scheduler.step(noise_pred, t_prev, latents_noisy).prev_sample
 
         for t in self.scheduler.timesteps:
             if t2 < t:
                 continue
-            print(t)
+            print(f"t2: {t}")
             noise_pred = self.pred_noise(latents_noisy, t, context)
-            latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
+            latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy).prev_sample.to(latents.dtype)
+            # latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
 
         x0 = self.decode_latents(latents_noisy)
 
