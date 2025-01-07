@@ -78,7 +78,8 @@ class StableVideo3d(Guidance):
         noise = randn_tensor(image.shape, generator=self.generator, device=self.device, dtype=image.dtype)
         noise_aug_strength = 1e-5
         image = image + noise_aug_strength * noise
-        image_latents = self.encode_images(image).repeat(1, len(polars_rad), 1, 1, 1)
+        image_latents = self.encode_images(image)
+        image_latents = torch.cat([torch.zeros_like(image_latents), image_latents]).repeat(1, len(polars_rad), 1, 1, 1)
 
         added_time_ids = self.pipeline._get_add_time_ids(
             noise_aug_strength=noise_aug_strength,
@@ -106,8 +107,8 @@ class StableVideo3d(Guidance):
         else:
             latent_model_input = self.scheduler.scale_model_input(latents_noisy, t)
 
-        latent_model_input = torch.cat([latent_model_input, context["image_latents"]], dim=2)
         latent_model_input = torch.cat([latent_model_input] * 2)
+        latent_model_input = torch.cat([latent_model_input, context["image_latents"]], dim=2)
 
         noise_pred = self.unet(
             latent_model_input,
@@ -196,6 +197,7 @@ if __name__ == '__main__':
                 polars_rad=polars_rad,
                 azimuths_rad=azimuths_rad,
                 generator=torch.manual_seed(opt.seed),
+                triangle_cfg_scaling=True,
                 output_type="pt",
             ).frames[0]
     else:
