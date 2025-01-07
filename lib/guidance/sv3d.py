@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -151,6 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--denoise_steps', type=int, default=25)
     parser.add_argument('--guidance_scale', type=float, default=3.0)
+    parser.add_argument('--use_pipe', action="store_true")
     # to avoid error
     parser.add_argument('--weighting_strategy', type=str, default='fantasia3d')
     parser.add_argument('--t_range', type=float, nargs='*', default=[0.02, 0.98])
@@ -159,7 +161,8 @@ if __name__ == '__main__':
     utils.seed_everything(opt.seed)
 
     device = torch.device('cuda')
-    output_path = f"tmp/sv3d/{opt.image_path.stem}.jpg"
+    output_dir = f"tmp/sv3d"
+    output_path = f"{output_dir}/{opt.image_path.stem}.jpg"
 
     sv3d = StableVideo3d(device, True, opt)
 
@@ -170,60 +173,47 @@ if __name__ == '__main__':
     azimuths_rad = [np.deg2rad((a - azimuths_deg[-1]) % 360) for a in azimuths_deg]
     azimuths_rad[:-1].sort()
 
-
     image = Image.open(opt.image_path)
     if len(image.split()) == 4:  # RGBA
         input_image = Image.new("RGB", image.size, (255, 255, 255))  # pure white bg
         input_image.paste(image, mask=image.split()[3])  # 3rd is the alpha channel
         image = input_image
 
-    opt.ddim_eta = 0.0
-    opt.t2_schedule = (1.0, 1.0)
-    opt.t1_ratio = 1.0
-    kwargs = {
-        "image": image,
-        "polars_rad": polars_rad,
-        "azimuths_rad": azimuths_rad,
-    }
-    with (torch.no_grad(),
-          torch.autocast("cuda", dtype=torch.float16, enabled=True)):
-        pred_rgb = torch.randn((num_frames, 3, sv3d_res, sv3d_res))
-        video_frames = sv3d.sample_refined_images(None, pred_rgb, 1.0, **kwargs)
+    if opt.use_pipe:
+        output_dir = f"{output_dir}/pipe"
+        output_path = f"{output_dir}/{opt.image_path.stem}.jpg"
+        os.makedirs(output_dir, exist_ok=True)
+
+        with (torch.no_grad(),
+              torch.autocast("cuda", dtype=torch.float16)):
+
+            video_frames = sv3d.pipeline(
+                image.resize((sv3d_res, sv3d_res)),
+                height=sv3d_res,
+                width=sv3d_res,
+                num_frames=num_frames,
+                decode_chunk_size=1,  # smaller to save memory
+                polars_rad=polars_rad,
+                azimuths_rad=azimuths_rad,
+                generator=torch.manual_seed(opt.seed),
+                output_type="pt",
+            ).frames[0]
+    else:
+        opt.ddim_eta = 0.0
+        opt.t2_schedule = (1.0, 1.0)
+        opt.t1_ratio = 1.0
+        kwargs = {
+            "image": image,
+            "polars_rad": polars_rad,
+            "azimuths_rad": azimuths_rad,
+        }
+        with (torch.no_grad(),
+              torch.autocast("cuda", dtype=torch.float16)):
+            pred_rgb = torch.randn((num_frames, 3, sv3d_res, sv3d_res))
+            video_frames = sv3d.sample_refined_images(None, pred_rgb, 1.0, **kwargs)
+
 
     save_image(video_frames, output_path)
-
-
-    # with (torch.no_grad(),
-    #       torch.autocast("cuda", dtype=torch.float16, enabled=True)):
-    #     image = Image.open(opt.image_path)
-    #     image.load()  # required for `.split()`
-    #     if len(image.split()) == 4:  # RGBA
-    #         input_image = Image.new("RGB", image.size, (255, 255, 255))  # pure white bg
-    #         input_image.paste(image, mask=image.split()[3])  # 3rd is the alpha channel
-    #     else:
-    #         input_image = image
-    #
-    #     video_frames = sv3d.pipeline(
-    #         input_image.resize((sv3d_res, sv3d_res)),
-    #         height=sv3d_res,
-    #         width=sv3d_res,
-    #         num_frames=num_frames,
-    #         decode_chunk_size=1,  # smaller to save memory
-    #         polars_rad=polars_rad,
-    #         azimuths_rad=azimuths_rad,
-    #         generator=torch.manual_seed(opt.seed),
-    #     ).frames[0]
-
-    # name = opt.image_path.name
-    # fps = 7
-    # video_frames[0].save(
-    #     output_path,
-    #     save_all=True,
-    #     append_images=video_frames[1:],
-    #     optimize=False,
-    #     duration=1000 // fps,
-    #     loop=0,
-    # )
     print(f"Saved {output_path}")
 
 
