@@ -54,6 +54,9 @@ class Guidance:
     def build_context(self, text_embeddings, **kwargs):
         raise NotImplementedError
 
+    def build_guidance_scale(self):
+        return None
+
     @torch.no_grad()
     def pred_noise(self, latents_noisy, t, context, guidance_scale=None):
         raise NotImplementedError
@@ -87,11 +90,12 @@ class Guidance:
         #     noise_pred = self.pred_noise(latents_noisy, t, context, guidance_scale=0, is_inverse=True)
         #     latents_noisy = self.inverse_scheduler.step(noise_pred, t_prev, latents_noisy).prev_sample
 
+        guidance_scale = self.build_guidance_scale()
         for t in self.scheduler.timesteps:
             if t2 < t:
                 continue
             print(f"t2: {t}")
-            noise_pred = self.pred_noise(latents_noisy, t, context)
+            noise_pred = self.pred_noise(latents_noisy, t, context, guidance_scale)
             latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy).prev_sample.to(latents.dtype)
             # latents_noisy = self.scheduler.step(noise_pred, t, latents_noisy, eta=self.opt.ddim_eta).prev_sample.to(latents.dtype)
 

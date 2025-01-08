@@ -98,6 +98,16 @@ class StableVideo3d(Guidance):
             "added_time_ids": added_time_ids,
         }
 
+    def build_guidance_scale(self):
+        min_gs = self.opt.min_guidance_scale
+        max_gs = self.opt.max_guidance_scale
+
+        guidance_scale = torch.cat([
+            torch.linspace(min_gs, max_gs, num_frames//2 + 1)[1:].unsqueeze(0),
+            torch.linspace(max_gs, min_gs, num_frames - num_frames//2 + 1)[1:].unsqueeze(0)
+        ], dim=-1)
+        return guidance_scale.view(1, -1, 1, 1, 1).to(self.device)
+
     @torch.no_grad()
     def pred_noise(self, latents_noisy, t, context, guidance_scale=None, is_inverse=False):
         t = t.repeat(2) if t.dim() > 0 else t
@@ -123,6 +133,7 @@ class StableVideo3d(Guidance):
         if guidance_scale is None:
             guidance_scale = self.opt.guidance_scale
 
+        print(noise_pred_uncond.shape, guidance_scale.shape)
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     def encode_images(self, images):
@@ -152,7 +163,8 @@ if __name__ == '__main__':
     parser.add_argument('-W', type=int, default=576)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--denoise_steps', type=int, default=25)
-    parser.add_argument('--guidance_scale', type=float, default=3.0)
+    parser.add_argument('--min_guidance_scale', type=float, default=1.0)
+    parser.add_argument('--max_guidance_scale', type=float, default=2.5)
     parser.add_argument('--use_pipe', action="store_true")
     # to avoid error
     parser.add_argument('--weighting_strategy', type=str, default='fantasia3d')
