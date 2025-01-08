@@ -5,8 +5,7 @@ import torch.nn.functional as F
 from torchvision.utils import save_image
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers.utils.torch_utils import randn_tensor
-# from diffusers import AutoencoderKL, DDIMScheduler, DDIMInverseScheduler
-from diffusers import AutoencoderKL, EulerDiscreteScheduler, EulerAncestralDiscreteScheduler
+from diffusers import AutoencoderKL, EulerDiscreteScheduler
 from pathlib import Path
 from PIL import Image
 import numpy as np
@@ -38,7 +37,6 @@ class StableVideo3d(Guidance):
         model_key = "chenguolin/sv3d-diffusers"
         self.unet = SV3DUNetSpatioTemporalConditionModel.from_pretrained(model_key, subfolder="unet", **pipe_kargs)
         self.vae = AutoencoderKL.from_pretrained(model_key, subfolder="vae", **pipe_kargs)
-        # self.scheduler = DDIMScheduler.from_pretrained(model_key, subfolder="scheduler", **pipe_kargs)
         self.scheduler = EulerDiscreteScheduler.from_pretrained(model_key, subfolder="scheduler", **pipe_kargs)
         self.scheduler.set_timesteps(self.opt.denoise_steps)
         self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(model_key, subfolder="image_encoder")
@@ -57,9 +55,9 @@ class StableVideo3d(Guidance):
         self.min_step = int(self.num_train_timesteps * opt.t_range[0])
         self.max_step = int(self.num_train_timesteps * opt.t_range[1])
 
+        self.inverse_scheduler = None
         # self.inverse_scheduler = DDIMInverseScheduler.from_config(self.scheduler.config)
-        self.inverse_scheduler = EulerAncestralDiscreteScheduler.from_config(self.scheduler.config)
-        self.inverse_scheduler.set_timesteps(self.opt.denoise_steps)
+        # self.inverse_scheduler.set_timesteps(self.opt.denoise_steps)
 
         print(f"[INFO] loaded sv3d")
 
@@ -133,7 +131,6 @@ class StableVideo3d(Guidance):
         if guidance_scale is None:
             guidance_scale = self.opt.guidance_scale
 
-        print(noise_pred_uncond.shape, guidance_scale.shape)
         return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     def encode_images(self, images):
