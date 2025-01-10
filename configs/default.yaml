@@ -18,6 +18,8 @@ guidance:
   lora: #None
   embeddings: #None
   guidance_scale: 100.
+  min_guidance_scale: 1.0
+  max_guidance_scale: 2.5
   denoise_steps: 50
   t2_schedule: [0.8, 0.5]
   t1_ratio: 0.6
@@ -36,7 +38,7 @@ training:
   train_face_start_steps: 0
   train_face_scale: 10.0
   train_face_center_diff_y: 0.0
-  train_face_front: False
+  train_face_front: []
   eval_interval: 10
   save_image_interval: 20
   workspace: "../data/tada"
@@ -71,7 +73,7 @@ data:
   far: 1000
   fovy_range: [50, 70]
   radius_range: [1.0, 1.2]
-  default_fovy: 60
+  default_fovy: 60.
   default_polar: 90
 #  fovy_range: [50, 51]
 #  radius_range: [1.19, 1.2]
@@ -86,12 +88,12 @@ data:
   dir_text: True
   jitter_pose: False
   uniform_sphere_rate: 0.
-#  image: "images/xiaole_rgba.png"
-#  image: "../data/tada/ablation_head/Cinderella/validation/ep0069_rgba.png"
-  image: ''
+  image: ""
+  face_image: ""
   data_dir: ""
   n_views: 1
   shuffle: False
+  orbit_type: "circle"
 model:
   mesh: ""
   tex_mlp: False

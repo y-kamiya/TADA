@@ -16,6 +16,7 @@ from lib.guidance.diffusers_sv3d import SV3DUNetSpatioTemporalConditionModel, St
 
 
 class StableVideo3d(Guidance):
+    n_frames = 21
     resolution = 576
 
     def __init__(self, device, fp16, opt):
@@ -76,12 +77,14 @@ class StableVideo3d(Guidance):
         noise = randn_tensor(image.shape, generator=self.generator, device=self.device, dtype=image.dtype)
         noise_aug_strength = 1e-5
         image = image + noise_aug_strength * noise
+
+        polars_rad = kwargs["polars_rad"]
         image_latents = self.encode_images(image)
         image_latents = torch.cat([torch.zeros_like(image_latents), image_latents]).repeat(1, len(polars_rad), 1, 1, 1)
 
         added_time_ids = self.pipeline._get_add_time_ids(
             noise_aug_strength=noise_aug_strength,
-            polars_rad=kwargs["polars_rad"],
+            polars_rad=polars_rad,
             azimuths_rad=kwargs["azimuths_rad"],
             dtype=image_embeddings.dtype,
             batch_size=1,
@@ -101,8 +104,8 @@ class StableVideo3d(Guidance):
         max_gs = self.opt.max_guidance_scale
 
         guidance_scale = torch.cat([
-            torch.linspace(min_gs, max_gs, num_frames//2 + 1)[1:].unsqueeze(0),
-            torch.linspace(max_gs, min_gs, num_frames - num_frames//2 + 1)[1:].unsqueeze(0)
+            torch.linspace(min_gs, max_gs, self.n_frames//2 + 1)[1:].unsqueeze(0),
+            torch.linspace(max_gs, min_gs, self.n_frames - self.n_frames//2 + 1)[1:].unsqueeze(0)
         ], dim=-1)
         return guidance_scale.view(1, -1, 1, 1, 1).to(self.device)
 

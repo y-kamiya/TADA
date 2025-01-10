@@ -148,9 +148,6 @@ if __name__ == '__main__':
                           )
         trainer.save_config(cfg, exp_cfg)
 
-        if os.path.exists(cfg.data.image):
-            trainer.default_view_data = train_loader.dataset.get_default_view_data()
-
         valid_loader = build_dataloader('val')
         max_epoch = np.ceil(cfg.training.iters / cfg.training.iters_per_epoch).astype(np.int32)
         trainer.train(train_loader, valid_loader, max_epoch)

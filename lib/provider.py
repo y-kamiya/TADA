@@ -333,6 +333,9 @@ class ViewDataset(torch.utils.data.Dataset):
             transforms.ToTensor()
         ])
 
+        self.image = self.load_image(self.opt.image)
+        self.face_image = self.load_image(self.opt.face_image)
+
         # [debug] visualize poses
         # self.test_camera()
 
@@ -369,137 +372,17 @@ class ViewDataset(torch.utils.data.Dataset):
         print("Done!")
         exit()
 
-    def load_images(self, path):
-        rgba = Image.open(path).convert('RGBA')
-        mask = rgba.split()[-1]
-        rgb = rgba.convert('RGB')
-        rgb = self.to_tensor(rgb)
-        mask = self.to_tensor(mask)
-        rgb = rgb * mask + (1 - mask)
-
-        depth = Image.open(path.replace('_rgba.png', '_depth.png'))
-        depth = self.to_tensor(depth)
-
-        normal = Image.open(path.replace('_rgba.png', '_normal.png'))
-        normal = 1 - self.to_tensor(normal)
-
-        return rgb, mask, depth, normal[[2, 1, 0]]
-
-    def get_default_view_data(self):
-        # opt.images, opt.ref_radii, opt.ref_polars, opt.ref_azimuths, opt.zero123_ws = [], [], [], [], []
-        ref_radii, ref_polars, ref_azimuths = [], [], []
-        if os.path.exists(self.opt.image):
-            ref_radii = [self.opt.default_radius]
-            ref_polars = [self.opt.default_polar]
-            ref_azimuths = [self.opt.default_azimuth]
-        else:
-            # todo for multi-images
-            return None
-
-        H = int(1 * self.H)
-        W = int(1 * self.W)
-        cx = H / 2
-        cy = W / 2
-
-        poses, dirs = circle_poses(
-            self.device,
-            radius=self.opt.default_radius,
-            theta=self.opt.default_polar,
-            phi=self.opt.default_azimuth,
-            return_dirs=True,
-            angle_overhead=self.opt.angle_overhead,
-            angle_front=self.opt.angle_front)
-
-        fov = self.opt.default_fovy
-        focal = H / (2 * np.tan(np.deg2rad(fov) / 2))
-        intrinsics = np.array([focal, focal, cx, cy])
-
-        projection = torch.tensor([
-            [2 * focal / W, 0, 0, 0],
-            [0, -2 * focal / H, 0, 0],
-            [0, 0, -(self.far + self.near) / (self.far - self.near),
-             -(2 * self.far * self.near) / (self.far - self.near)],
-            [0, 0, -1, 0]
-        ], dtype=torch.float32, device=self.device)
-
-        mvp = projection @ torch.inverse(poses.squeeze(0))  # [4, 4]
-
-        # sample a low-resolution but full image
-        rays_o, rays_d = get_rays(poses, intrinsics, self.H, self.W, -1)
-
-        # load image
-        rgb, mask, depth, normal = self.load_images(self.opt.image)
-        # print(rgb.shape, mask.shape, depth.shape, normal.shape)
-        # exit()
-
-        data = {
-            'H': H,
-            'W': W,
-            'rays_o': rays_o,
-            'rays_d': rays_d,
-            'dir': dirs.unsqueeze(0),
-            'mvp': mvp.unsqueeze(0),
-            'polar': self.opt.default_polar,
-            'azimuth': self.opt.default_azimuth,
-            'radius': self.opt.default_radius,
-            'dirkey': [self.id_dir_map[dirs]],
-            'camera_type': ["body"],
-            'rgb': rgb.unsqueeze(0).to(self.device),
-            'mask': mask.to(self.device),
-            'depth': depth.to(self.device),
-            'normal': normal.unsqueeze(0).to(self.device),
-        }
-
-        return data
+    @classmethod
+    def load_image(cls, path: str):
+        image = Image.open(path)
+        if len(image.split()) == 4:
+            input_image = Image.new("RGB", image.size, (255, 255, 255))
+            input_image.paste(image, mask=image.split()[3])
+            image = input_image
+        return image
 
     def __getitem__(self, idx):
-        if self.training:
-            # random pose on the fly
-            if self.full_body:
-                camera_type = "body"
-                # poses, dirs, thetas, phis, radius = rand_poses(
-                #     1,
-                #     self.device,
-                #     return_dirs=self.opt.dir_text,
-                #     radius_range=self.opt.radius_range,
-                #     phi_range=self.opt.phi_range,
-                #     theta_range=self.opt.theta_range,
-                #     angle_overhead=self.opt.angle_overhead,
-                #     angle_front=self.opt.angle_front,
-                #     jitter=self.opt.jitter_pose,
-                #     uniform_sphere_rate=self.opt.uniform_sphere_rate)
-                poses, dirs, thetas, phis, radius = near_head_poses(
-                    1,
-                    self.device,
-                    return_dirs=self.opt.dir_text,
-                    radius_range=self.opt.radius_range,
-                    phi_range=self.opt.phi_range,
-                    theta_range=self.opt.theta_range,
-                    angle_overhead=self.opt.angle_overhead,
-                    angle_front=self.opt.angle_front,
-                    jitter=self.opt.jitter_pose,
-                    shift=self.body_center,
-                    face_scale=self.body_scale
-                )
-
-            else:
-                camera_type = "face"
-                poses, dirs, thetas, phis, radius = near_head_poses(
-                    1,
-                    self.device,
-                    return_dirs=self.opt.dir_text,
-                    phi_range=self.opt.head_phi_range,
-                    theta_range=self.opt.head_theta_range,
-                    angle_overhead=self.opt.angle_overhead,
-                    angle_front=self.opt.angle_front,
-                    jitter=self.opt.jitter_pose,
-                    shift=self.face_center,
-                    face_scale=self.face_scale
-                )
-
-            # random focal
-            fov = random.random() * (self.opt.fovy_range[1] - self.opt.fovy_range[0]) + self.opt.fovy_range[0]
-        else:
+        if not self.training:
             camera_type = "body"
             # circle pose
             radius = 1.4
@@ -517,6 +400,74 @@ class ViewDataset(torch.utils.data.Dataset):
 
             # fixed focal
             # fov = (self.opt.fovy_range[1] + self.opt.fovy_range[0]) / 2
+            return self.build_view_data(fov, thetas, phis, radius, poses, dirs, camera_type)
+
+        if self.opt.orbit_type == "circle":
+            camera_type = "body" if self.full_body else "face"
+            radius = 1.9
+            radius *= self.body_scale if self.full_body else self.face_scale
+            fov = 33.8
+            idx += 1
+            phis = ((idx / self.size) * 360) % 360
+            thetas = 90
+            poses, dirs = circle_poses(
+                self.device,
+                radius=radius,
+                theta=thetas,
+                phi=-phis,
+                return_dirs=self.opt.dir_text,
+                angle_overhead=self.opt.angle_overhead,
+                angle_front=self.opt.angle_front,
+                head_shift=self.body_center if self.full_body else self.face_center
+            )
+
+            return self.build_view_data(fov, thetas, phis, radius, poses, dirs, camera_type)
+
+        # random pose on the fly
+        if self.full_body:
+            camera_type = "body"
+            # poses, dirs, thetas, phis, radius = rand_poses(
+            #     1,
+            #     self.device,
+            #     return_dirs=self.opt.dir_text,
+            #     radius_range=self.opt.radius_range,
+            #     phi_range=self.opt.phi_range,
+            #     theta_range=self.opt.theta_range,
+            #     angle_overhead=self.opt.angle_overhead,
+            #     angle_front=self.opt.angle_front,
+            #     jitter=self.opt.jitter_pose,
+            #     uniform_sphere_rate=self.opt.uniform_sphere_rate)
+            poses, dirs, thetas, phis, radius = near_head_poses(
+                1,
+                self.device,
+                return_dirs=self.opt.dir_text,
+                radius_range=self.opt.radius_range,
+                phi_range=self.opt.phi_range,
+                theta_range=self.opt.theta_range,
+                angle_overhead=self.opt.angle_overhead,
+                angle_front=self.opt.angle_front,
+                jitter=self.opt.jitter_pose,
+                shift=self.body_center,
+                face_scale=self.body_scale
+            )
+
+        else:
+            camera_type = "face"
+            poses, dirs, thetas, phis, radius = near_head_poses(
+                1,
+                self.device,
+                return_dirs=self.opt.dir_text,
+                phi_range=self.opt.head_phi_range,
+                theta_range=self.opt.head_theta_range,
+                angle_overhead=self.opt.angle_overhead,
+                angle_front=self.opt.angle_front,
+                jitter=self.opt.jitter_pose,
+                shift=self.face_center,
+                face_scale=self.face_scale
+            )
+
+        # random focal
+        fov = random.random() * (self.opt.fovy_range[1] - self.opt.fovy_range[0]) + self.opt.fovy_range[0]
 
         return self.build_view_data(fov, thetas, phis, radius, poses, dirs, camera_type)
 
@@ -539,8 +490,8 @@ class ViewDataset(torch.utils.data.Dataset):
 
         delta_polar = thetas - self.opt.default_polar
         delta_azimuth = phis - self.opt.default_azimuth
-        if delta_azimuth > 180:
-            delta_azimuth -= 360  # range in [-180, 180]
+        # if delta_azimuth > 180:
+        #     delta_azimuth -= 360  # range in [-180, 180]
         delta_radius = radius - self.opt.default_radius
 
         data = {
@@ -556,8 +507,8 @@ class ViewDataset(torch.utils.data.Dataset):
             # 'azimuth': phis,
             'camera_type': camera_type,
 
-            'polar': delta_polar,
-            'azimuth': delta_azimuth,
+            'polars_rad': np.deg2rad(thetas),
+            'azimuths_rad': np.deg2rad(delta_azimuth),
             'radius': delta_radius,
         }
 

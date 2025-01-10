@@ -66,6 +66,8 @@ class Guidance:
         pred_rgb_scaled = F.interpolate(pred_rgb, (self.resolution, self.resolution), mode='bilinear', align_corners=False)
         latents = self.encode_images(pred_rgb_scaled)
 
+        self.scheduler.set_timesteps(self.opt.denoise_steps)
+
         t2_schedule_current = self.opt.t2_schedule[0] - t_anneal * (self.opt.t2_schedule[0] - self.opt.t2_schedule[1])
         if t2_schedule_current >= 1.0:
             t2_schedule_current = 0.999999

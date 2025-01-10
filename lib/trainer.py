@@ -253,14 +253,14 @@ class Trainer(object):
         return dpt_normal_raw * mask + (1 - mask)
 
     def sample_refined_images(self, data, image):
-        if "image" in data and data["image"] is not None:
+        if self.guidance is None and "image" in data and data["image"] is not None:
             image = data["image"].to(self.device)
             mask = data["alpha"].to(self.device)
             dpt_normal = self.dpt_normal(image, mask)
             return image, mask, dpt_normal
 
         dir_text_z = None
-        if "camera_type" in data:
+        if "camera_type" in data and self.text_embeds["uncond"] is not None:
             bs = data["mvp"].shape[0]
             uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
             cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
@@ -292,6 +292,7 @@ class Trainer(object):
 
         data["is_full_body"] = is_full_body
         data["comp_rgb_bg"] = out["bg_color"]
+        data["image"] = loader.dataset.image if is_full_body else loader.dataset.face_image
         refined_image, mask, dpt_normal = self.sample_refined_images(data, image)
         refined_image_orig = refined_image
         if refined_image.shape[-1] != W_anneal:
@@ -300,11 +301,10 @@ class Trainer(object):
             dpt_normal = VF.resize(dpt_normal, (H, W))
 
         if self.opt.train_face_front and not is_full_body:
-            s, e = bs // 4, bs - (bs // 4)
-            refined_image = refined_image[s:e]
-            refined_image_orig = refined_image_orig[s:e]
-            mask = mask[s:e]
-            dpt_normal = dpt_normal[s:e]
+            refined_image = refined_image[self.opt.train_face_front]
+            refined_image_orig = refined_image_orig[self.opt.train_face_front]
+            mask = mask[self.opt.train_face_front]
+            dpt_normal = dpt_normal[self.opt.train_face_front]
 
         total_loss = 0
         for k in range(self.opt.sir_recon_iters):
@@ -319,9 +319,9 @@ class Trainer(object):
             alpha = out['alpha'].permute(0, 3, 1, 2)
 
             if self.opt.train_face_front and not is_full_body:
-                image = image[s:e]
-                normal = normal[s:e]
-                alpha = alpha[s:e]
+                image = image[self.opt.train_face_front]
+                normal = normal[self.opt.train_face_front]
+                alpha = alpha[self.opt.train_face_front]
 
             loss_rgb = F.l1_loss(image, refined_image)
             with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
@@ -364,22 +364,12 @@ class Trainer(object):
         return pred, total_loss
 
     def train_step(self, data, is_full_body):
-        do_rgbd_loss = self.default_view_data is not None and (self.global_step % self.opt.known_view_interval == 0)
-
-        if do_rgbd_loss:
-            data = self.default_view_data
-
         H, W = data['H'][0], data['W'][0]
         mvp = data['mvp']  # [B, 4, 4]
         rays_o = data['rays_o']  # [B, N, 3]
         rays_d = data['rays_d']  # [B, N, 3]
 
         H, W = self.calc_annealed_size(H, W)
-
-        if do_rgbd_loss and self.opt.known_view_noise_scale > 0:
-            noise_scale = self.opt.known_view_noise_scale  # * (1 - self.global_step / self.opt.iters)
-            rays_o = rays_o + torch.randn(3, device=self.device) * noise_scale
-            rays_d = rays_d + torch.randn(3, device=self.device) * noise_scale
 
         # ==============================================================================================
         #  Compute loss
@@ -411,7 +401,7 @@ class Trainer(object):
 
         p_iter = self.global_step / self.opt.iters
 
-        if do_rgbd_loss:  # with image input
+        if False:  # with image input
             # gt_mask = data['mask']  # [B, H, W]
             gt_rgb = data['rgb']  # [B, 3, H, W]
             gt_normal = data['normal']  # [B, H, W, 3]
