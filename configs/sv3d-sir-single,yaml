@@ -1,0 +1,61 @@
+name: 'sv3d-sir'
+stage: geo_tex
+fp16: True
+batch_size: 21
+guidance:
+  name: sv3d
+  guidance_scale:
+  denoise_steps: 25
+  t2_schedule: [1.0, 1.0]
+  t1_ratio: 1.0
+  ddim_eta: 0.0
+model:
+  albedo_res: 1024
+  init_with_tpose: False
+  lr_albedo: 10.
+  lr_voffset: 0.1
+  lr_betas: 0.5
+  lr_expression: 0.25
+training:
+  lr: 0.001
+  anneal_tex_reso: True
+  anneal_tex_reso_size: 128
+  train_face_ratio: 0.0
+  train_face_start_steps: 9450
+  train_face_scale: 1.29
+  train_face_center_diff_y: 0.0
+  train_face_front: [0, 1, 2, 17, 18, 19, 20]
+  iters: 63000
+  iters_per_epoch: 10500
+  sir_recon_iters: 500
+  eval_interval: 1
+  save_image_interval: 1050
+  ckpt: scratch
+  workspace: "output"
+  use_dpt: True
+  use_isnet: True
+  use_lpips: True
+  strategy: 'sir'
+  sr: 1
+  lambda_lpips: 1.6
+  lambda_rgb: 1.6
+  lambda_mask: 0.04
+  lambda_normal: 0.4
+  lambda_laplacian: 0.4
+  lambda_normal_consistency: 0.04
+  lambda_bilateral: 0.1
+  lambda_expand: 0.0
+  lambda_all: 0.1
+  reverse_dpt_normal: True
+data:
+  h: 384
+  w: 384
+  default_fovy: 33.8
+  phi_range: [-180, 180]
+  theta_range: [85, 90]
+  head_phi_range: [-30, 30]
+  head_theta_range: [75, 85]
+  near: 0.1 # to adjust camera
+  image: "data/images/unitychan_a_e0/0.png"
+  face_image: "data/images/unitychan_a_e0_face.png"
+
