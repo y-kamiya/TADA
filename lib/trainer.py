@@ -399,38 +399,21 @@ class Trainer(object):
 
         p_iter = self.global_step / self.opt.iters
 
-        if False:  # with image input
-            # gt_mask = data['mask']  # [B, H, W]
-            gt_rgb = data['rgb']  # [B, 3, H, W]
-            gt_normal = data['normal']  # [B, H, W, 3]
-            gt_depth = data['depth']  # [B, H, W]
-            # rgb loss
-            loss = self.opt.lambda_rgb * F.mse_loss(image, gt_rgb)
-            # normal loss
-            if self.opt.lambda_normal > 0:
-                lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
-                loss = loss + lambda_normal * (1 - F.cosine_similarity(normal, gt_normal).mean())
-            # depth loss
-            if self.opt.lambda_depth > 0:
-                lambda_depth = self.opt.lambda_depth * min(1, self.global_step / self.opt.iters)
-                loss = loss + lambda_depth * (1 - self.pearson(depth, gt_depth))
+        loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
+        if not self.dpt:
+            # normal sds
+            loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
+            # latent mean sds
+            loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()]), data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
         else:
-            # rgb sds
-            loss = self.guidance.train_step(dir_text_z, image_annel, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
-            if not self.dpt:
+            if p_iter < 0.3 or random.random() < 0.5:
                 # normal sds
                 loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
-                # latent mean sds
-                loss += self.guidance.train_step(dir_text_z, torch.cat([normal, image.detach()]), data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
-            else:
-                if p_iter < 0.3 or random.random() < 0.5:
-                    # normal sds
-                    loss += self.guidance.train_step(dir_text_z, normal, data=data, bg_color=out["bg_color"], is_full_body=is_full_body).mean()
-                elif self.dpt is not None :
-                    # normal image loss
-                    dpt_normal = self.dpt_normal(image, alpha)
-                    lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
-                    loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
+            elif self.dpt is not None :
+                # normal image loss
+                dpt_normal = self.dpt_normal(image, alpha)
+                lambda_normal = self.opt.lambda_normal * min(1, self.global_step / self.opt.iters)
+                loss += lambda_normal * (1 - F.cosine_similarity(normal, dpt_normal).mean())
 
         pred = None
         if self.global_step % self.opt.save_image_interval == 0:
