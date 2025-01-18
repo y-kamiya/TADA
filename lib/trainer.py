@@ -252,6 +252,15 @@ class Trainer(object):
 
         return dpt_normal_raw * mask + (1 - mask)
 
+    def build_dir_text(self, data):
+        if "camera_type" not in data or self.text_embeds["uncond"] is None:
+            return None
+
+        bs = data["mvp"].shape[0]
+        uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
+        cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
+        return torch.cat([uncond, cond])
+
     def sample_refined_images(self, data, image):
         if self.guidance is None and "image" in data and data["image"] is not None:
             image = data["image"].to(self.device)
@@ -259,12 +268,7 @@ class Trainer(object):
             dpt_normal = self.dpt_normal(image, mask)
             return image, mask, dpt_normal
 
-        dir_text_z = None
-        if "camera_type" in data and self.text_embeds["uncond"] is not None:
-            bs = data["mvp"].shape[0]
-            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
-            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
-            dir_text_z = torch.cat([uncond, cond])
+        dir_text_z = self.build_dir_text(data)
 
         with torch.no_grad():
             refined_image = self.guidance.sample_refined_images(dir_text_z, image, self.global_step / self.opt.iters, self.realesrgan, **data)
@@ -292,7 +296,6 @@ class Trainer(object):
 
         data["is_full_body"] = is_full_body
         data["comp_rgb_bg"] = out["bg_color"]
-        data["image"] = loader.dataset.image if is_full_body else loader.dataset.face_image
         refined_image, mask, dpt_normal = self.sample_refined_images(data, image)
         refined_image_orig = refined_image
         if refined_image.shape[-1] != W_anneal:
@@ -375,12 +378,7 @@ class Trainer(object):
         #  Compute loss
         # ==============================================================================================
 
-        dir_text_z = None
-        if "camera_type" in data:
-            bs = data["H"].shape[0]
-            uncond = self.text_embeds['uncond'].repeat(bs, 1, 1)
-            cond = self.text_embeds[data['camera_type'][0]][data['dirkey'][0]].repeat(bs, 1, 1)
-            dir_text_z = torch.cat([uncond, cond])
+        dir_text_z = self.build_dir_text(data)
 
         with torch.cuda.amp.autocast(enabled=self.fp16, dtype=torch.float32):
             out = self.model(rays_o, rays_d, mvp, data['H'][0], data['W'][0], shading='albedo')
@@ -616,6 +614,8 @@ class Trainer(object):
                 ]).float().repeat(4, 1, 1)
                 c2w = convert_blender_to_opengl(torch.bmm(rot, data["c2w"]))
                 data["mvp"] = get_mvp_matrix(c2w, data["proj_mtx"]).to(self.device)
+
+            data["image"] = loader.dataset.ref_image
 
             if self.opt.strategy == "sir":
                 with torch.cuda.amp.autocast(enabled=self.fp16):

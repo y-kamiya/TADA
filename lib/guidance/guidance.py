@@ -19,6 +19,7 @@ class Guidance:
         t = torch.randint(self.min_step, self.max_step + 1, (latents.shape[0],), dtype=torch.long, device=self.device)
         context = self.build_context(text_embeddings, **data)
 
+        guidance_scale = self.build_guidance_scale()
         with torch.no_grad():
             noise = torch.randn_like(latents)
             latents_noisy = self.scheduler.add_noise(latents, noise, t)

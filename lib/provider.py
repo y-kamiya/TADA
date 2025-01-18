@@ -339,6 +339,12 @@ class ViewDataset(torch.utils.data.Dataset):
         # [debug] visualize poses
         # self.test_camera()
 
+    @property
+    def ref_image(self):
+        if not self.full_body:
+            return self.face_image
+        return self.image
+
     @staticmethod
     def modify_commandline_options(parser, full_body, face_center, face_scale, body_center, body_scale):
         return parser
