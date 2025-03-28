@@ -252,8 +252,8 @@ class Animation:
             # re-mesh
             v_cano_dense = subdivide_inorder(v_cano, self.smplx_face[SMPLXSeg.remesh_mask], self.unique).squeeze(0)
             # add offsets
-            vn = compute_normal(v_cano_dense, self.dense_faces)[0]
-            v_cano_dense += self.v_offsets * vn
+            vn = compute_normal(v_cano_dense.unsqueeze(0), self.dense_faces)[0]
+            v_cano_dense += self.v_offsets * vn.squeeze(0)
             # do LBS
             v_posed_dense = warp_points(v_cano_dense, self.dense_lbs_weights, output.joints_transform[:, :55])
 
@@ -323,8 +323,8 @@ class Animation:
             # re-mesh
             v_cano_dense = subdivide_inorder(v_cano, self.smplx_face[SMPLXSeg.remesh_mask], self.unique).squeeze(0)
             # add offsets
-            vn = compute_normal(v_cano_dense, self.dense_faces)[0]
-            v_cano_dense += self.v_offsets * vn
+            vn = compute_normal(v_cano_dense.unsqueeze(0), self.dense_faces)[0]
+            v_cano_dense += self.v_offsets * vn.squeeze(0)
             # do LBS
             v_posed_dense = warp_points(v_cano_dense, self.dense_lbs_weights, output.joints_transform[:, :55])
             scan_v_posed.append(v_posed_dense)
@@ -373,8 +373,8 @@ class Animation:
             # re-mesh
             v_cano_dense = subdivide_inorder(v_cano, self.smplx_face[SMPLXSeg.remesh_mask], self.unique).squeeze(0)
             # add offsets
-            vn = compute_normal(v_cano_dense, self.dense_faces)[0]
-            v_cano_dense += self.v_offsets * vn
+            vn = compute_normal(v_cano_dense.unsqueeze(0), self.dense_faces)[0]
+            v_cano_dense += self.v_offsets * vn.squeeze(0)
             # do LBS
             v_posed_dense = warp_points(v_cano_dense, self.dense_lbs_weights, output.joints_transform[:, :55])
             # translate
@@ -391,6 +391,7 @@ class Animation:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--subject', type=str, required=True, help="subject's name or input text prompt")
+    parser.add_argument('--guidance_type', default="sv3d-sir", type=str)
     parser.add_argument('--render_res', default=1024, type=int, help="rendered image resolution")
     parser.add_argument('--save_dir', default='out', type=str, help="save dir")
     parser.add_argument('--workspace', default='workspace', type=str, help="workspace dir")
@@ -401,7 +402,7 @@ if __name__ == '__main__':
                         help="file of motion diffusion file for face animation")
     args = parser.parse_args()
 
-    ckpt_file = f"{args.workspace}/with_normal_supervision/{args.subject}/checkpoints/with_normal_supervision_ep0150.pth"
+    ckpt_file = f"{args.workspace}/{args.guidance_type}/{args.subject}/checkpoints/{args.guidance_type}.pth"
     print(ckpt_file)
     assert os.path.exists(ckpt_file)
     animator = Animation(render_res=args.render_res)
