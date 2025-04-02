@@ -40,8 +40,8 @@ class Visualizer:
 
     def set_camera_view(self):
         ctr = self.vis.get_view_control()
-        ctr.set_front([1, 0.5, 1.5])
-        ctr.set_zoom(2)
+        ctr.set_front(args.camera_front)
+        ctr.set_zoom(args.camera_zoom)
         
     def run(self):
         if not self.obj_files[0].with_suffix(".orig.mtl").exists():
@@ -53,7 +53,8 @@ class Visualizer:
 
         h, w, _ = np.array(self.vis.capture_screen_float_buffer(do_render=True)).shape
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        output_path = args.srcdir / "output.mp4"
+        x, y, z = args.camera_front
+        output_path = args.srcdir / f"output_zoom{args.camera_zoom}_x{x}_y{y}_z{z}_fps{args.fps}.mp4"
         out = cv2.VideoWriter(output_path, fourcc, self.args.fps, (w, h))
 
         for obj_file in self.obj_files:
@@ -82,6 +83,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--srcdir', type=Path, default="out/single576_anneal_ep5-mdm")
     parser.add_argument('--fps', type=int, default=10)
+    parser.add_argument('--camera_front', type=float, nargs="*", default=[1, 0.5, 1.5])
+    parser.add_argument('--camera_zoom', type=float, default=2.0)
     args = parser.parse_args()
     print(args)
 
